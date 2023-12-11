@@ -10,7 +10,7 @@ import { Event, Filter } from "nostr-tools";
 import dayjs from "dayjs";
 
 import db from "./db";
-import { getEventsForFilters } from "./nostr-idb/query-filter";
+import { queryWithCursors } from "./nostr-idb/query-filter";
 import { addEvent, createWriteTransaction } from "./nostr-idb/ingest";
 import { countEvents, countEventsByPubkey } from "./nostr-idb/query-misc";
 
@@ -72,19 +72,6 @@ const CountEvents = memo(() => {
     </button>
   );
 });
-
-async function injestEvents(events: Event[]) {
-  console.time("Add Events");
-  const before = await countEvents(db);
-  const trans = createWriteTransaction(db);
-  for (const event of events) {
-    addEvent(db, event, trans);
-  }
-  await trans.commit();
-  console.timeEnd("Add Events");
-  const after = await countEvents(db);
-  console.log(`Added ${after - before} events`);
-}
 
 const BATCH_COUNT = 1000;
 const IngestEventsFile = memo(() => {
@@ -167,7 +154,9 @@ const EXAMPLE_QUERY = `
 
 const QueryForm = memo(
   ({ onSubmit }: { onSubmit: (query: string) => Promise<any> }) => {
-    const [query, setQuery] = useState(EXAMPLE_QUERY);
+    const [query, setQuery] = useState(
+      localStorage.getItem("query") || EXAMPLE_QUERY,
+    );
 
     const [loading, setLoading] = useState(false);
     const handleSubmit = useCallback<FormEventHandler>(
@@ -186,7 +175,10 @@ const QueryForm = memo(
         <form onSubmit={handleSubmit}>
           <textarea
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              localStorage.setItem("query", e.target.value);
+            }}
             cols={100}
             rows={15}
           />
@@ -248,13 +240,17 @@ const QueryEvents = memo(() => {
 
   const runQuery = useCallback(async (query: string) => {
     try {
+      setResults([]);
       const start = new Date().valueOf();
       const filter = JSON.parse(query) as Filter;
-      setResults(await getEventsForFilters(db, [filter]));
+      setResults(await queryWithCursors(db, filter));
       const end = new Date().valueOf();
       setTime(end - start);
     } catch (e) {
-      if (e instanceof Error) alert(e.message);
+      if (e instanceof Error) {
+        alert(e.message);
+        console.log(e);
+      }
     }
   }, []);
 

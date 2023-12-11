@@ -11,11 +11,13 @@ export async function openDatabase(
   return await openDB<Schema>(name, NOSTR_IDB_VERSION, {
     ...callbacks,
     upgrade(db, oldVersion, newVersion, transaction, event) {
-      const events = db.createObjectStore("events", { keyPath: "event.id" });
+      const events = db.createObjectStore("events", {
+        keyPath: "event.created_at",
+      });
       events.createIndex("id", "event.id", { unique: true });
       events.createIndex("pubkey", "event.pubkey");
       events.createIndex("kind", "event.kind");
-      events.createIndex("create_at", "event.created_at");
+      events.createIndex("created_at", "event.created_at");
       events.createIndex("tags", "tags", { multiEntry: true });
       events.createIndex("firstSeen", "firstSeen");
       events.createIndex("lastUsed", "lastUsed");

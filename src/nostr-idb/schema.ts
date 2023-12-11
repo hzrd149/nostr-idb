@@ -3,7 +3,7 @@ import type { Event } from "nostr-tools";
 
 export interface Schema extends DBSchema {
   events: {
-    key: "id";
+    key: number;
     value: {
       event: Event;
       tags: string[];
@@ -14,7 +14,7 @@ export interface Schema extends DBSchema {
       id: string;
       pubkey: string;
       kind: number;
-      create_at: number;
+      created_at: number;
       tags: string;
       firstSeen: number;
       lastUsed: number;
