@@ -1,14 +1,19 @@
-import { DeleteDBCallbacks, OpenDBCallbacks, deleteDB, openDB } from "idb";
+import {
+  DeleteDBCallbacks,
+  OpenDBCallbacks,
+  deleteDB as idbDeleteDB,
+  openDB as idbOpenDB,
+} from "idb";
 import { Schema } from "./schema.js";
 
 export const NOSTR_IDB_NAME = "nostr-idb";
 export const NOSTR_IDB_VERSION = 1;
 
-export async function openDatabase(
+export async function openDB(
   name = NOSTR_IDB_NAME,
   callbacks?: OpenDBCallbacks<Schema>,
 ) {
-  return await openDB<Schema>(name, NOSTR_IDB_VERSION, {
+  return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
     ...callbacks,
     upgrade(db, oldVersion, newVersion, transaction, event) {
       const events = db.createObjectStore("events", { keyPath: "event.id" });
@@ -32,9 +37,9 @@ export async function openDatabase(
   });
 }
 
-export async function deleteDatabase(
+export async function deleteDB(
   name = NOSTR_IDB_NAME,
   callbacks?: DeleteDBCallbacks,
 ) {
-  return await deleteDB(name, callbacks);
+  return await idbDeleteDB(name, callbacks);
 }

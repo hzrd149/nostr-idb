@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "description": "A collection of helper methods for storing nostr events in IndexedDB",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hzrd149/nostr-idb.git"
+  },
   "type": "module",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +15,9 @@
   ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc --project tsconfig.json"
+    "build": "tsc",
+    "prepare": "tsc",
+    "format": "prettier -w ."
   },
   "dependencies": {
     "idb": "^8.0.0",
