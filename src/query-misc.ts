@@ -1,6 +1,6 @@
 import { NostrIDB } from "./schema.js";
 
-export async function countEventsByAllPubkeys(db: NostrIDB) {
+export async function countEventsByPubkeys(db: NostrIDB) {
   let cursor = await db
     .transaction("events", "readonly")
     .objectStore("events")
@@ -18,12 +18,22 @@ export async function countEventsByAllPubkeys(db: NostrIDB) {
   return counts;
 }
 
-export async function countEventsByPubkey(db: NostrIDB, pubkey: string) {
-  return await db
+export async function countEventsByKind(db: NostrIDB) {
+  let cursor = await db
     .transaction("events", "readonly")
     .objectStore("events")
-    .index("pubkey")
-    .count(pubkey);
+    .index("kind")
+    .openKeyCursor();
+  if (!cursor) return {};
+
+  const counts: Record<string, number> = {};
+  while (cursor) {
+    const kind = cursor.key;
+    counts[kind] = (counts[kind] || 0) + 1;
+    cursor = await cursor.continue();
+  }
+
+  return counts;
 }
 
 export function countEvents(db: NostrIDB) {

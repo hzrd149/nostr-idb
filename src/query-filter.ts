@@ -79,7 +79,13 @@ export async function queryForTime(
   return ids;
 }
 
-export async function getIdsForFilter(db: NostrIDB, filter: Filter) {
+export async function getIdsForFilter(
+  db: NostrIDB,
+  filter: Filter,
+): Promise<Set<string>> {
+  // search is not supported, return an empty set
+  if (filter.search) return new Set();
+
   if (filter.ids) return new Set(filter.ids);
 
   let ids: Set<string> | null = null;
@@ -131,8 +137,7 @@ export async function getIdsForFilters(db: NostrIDB, filters: Filter[]) {
   return ids;
 }
 
-export async function getEventsForFilters(db: NostrIDB, filters: Filter[]) {
-  const ids = await getIdsForFilters(db, filters);
+async function loadEventsById(db: NostrIDB, ids: string[], filters: Filter[]) {
   const events: Event[] = [];
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
@@ -155,5 +160,22 @@ export async function getEventsForFilters(db: NostrIDB, filters: Filter[]) {
 
   return sorted;
 }
+export async function getEventsForFilter(db: NostrIDB, filter: Filter) {
+  const ids = await getIdsForFilter(db, filter);
+  return await loadEventsById(db, Array.from(ids), [filter]);
+}
 
-export async function countEventsForFilters(db: NostrIDB, filters: Filter[]) {}
+export async function getEventsForFilters(db: NostrIDB, filters: Filter[]) {
+  const ids = await getIdsForFilters(db, filters);
+  return await loadEventsById(db, Array.from(ids), filters);
+}
+
+export async function countEventsForFilter(db: NostrIDB, filter: Filter) {
+  const ids = await getIdsForFilter(db, filter);
+  return ids.size;
+}
+
+export async function countEventsForFilters(db: NostrIDB, filters: Filter[]) {
+  const ids = await getIdsForFilters(db, filters);
+  return ids.size;
+}
