@@ -1,5 +1,5 @@
-import { openDB, deleteDB, OpenDBCallbacks, DeleteDBCallbacks } from "idb";
-import { Schema } from "./schema";
+import { DeleteDBCallbacks, OpenDBCallbacks, deleteDB, openDB } from "idb";
+import { Schema } from "./schema.js";
 
 export const NOSTR_IDB_NAME = "nostr-idb";
 export const NOSTR_IDB_VERSION = 1;
@@ -16,9 +16,15 @@ export async function openDatabase(
       events.createIndex("pubkey", "event.pubkey");
       events.createIndex("kind", "event.kind");
       events.createIndex("create_at", "event.created_at");
+
       events.createIndex("tags", "tags", { multiEntry: true });
-      events.createIndex("firstSeen", "firstSeen");
-      events.createIndex("lastUsed", "lastUsed");
+
+      const seen = db.createObjectStore("seen", { keyPath: "id" });
+      seen.createIndex("date", "date");
+      seen.createIndex("relay", "relays", { multiEntry: true });
+
+      const used = db.createObjectStore("used", { keyPath: "id" });
+      used.createIndex("date", "date");
 
       if (callbacks?.upgrade)
         callbacks.upgrade(db, oldVersion, newVersion, transaction, event);
@@ -32,6 +38,3 @@ export async function deleteDatabase(
 ) {
   return await deleteDB(name, callbacks);
 }
-
-export * from "./query-filter";
-export * from "./query-misc";

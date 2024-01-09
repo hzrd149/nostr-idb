@@ -10,9 +10,14 @@ import { Event, Filter } from "nostr-tools";
 import dayjs from "dayjs";
 
 import db from "./db";
-import { getEventsForFilters } from "./nostr-idb/query-filter";
-import { addEvent, createWriteTransaction } from "./nostr-idb/ingest";
-import { countEvents, countEventsByPubkey } from "./nostr-idb/query-misc";
+import {
+  addEvent,
+  createWriteTransaction,
+  updateUsed,
+  countEventsByAllPubkeys,
+  countEvents,
+  getEventsForFilters,
+} from "../../src/index";
 
 const TopPubkeys = memo(() => {
   const [loading, setLoading] = useState(false);
@@ -20,7 +25,7 @@ const TopPubkeys = memo(() => {
   const update = useCallback(() => {
     setLoading(true);
     console.time("Counting events by pubkey");
-    countEventsByPubkey(db)
+    countEventsByAllPubkeys(db)
       .then((counts) => {
         const top = Array.from(Object.entries(counts))
           .sort((a, b) => b[1] - a[1])
@@ -72,19 +77,6 @@ const CountEvents = memo(() => {
     </button>
   );
 });
-
-async function injestEvents(events: Event[]) {
-  console.time("Add Events");
-  const before = await countEvents(db);
-  const trans = createWriteTransaction(db);
-  for (const event of events) {
-    addEvent(db, event, trans);
-  }
-  await trans.commit();
-  console.timeEnd("Add Events");
-  const after = await countEvents(db);
-  console.log(`Added ${after - before} events`);
-}
 
 const BATCH_COUNT = 1000;
 const IngestEventsFile = memo(() => {
@@ -147,6 +139,31 @@ const IngestEventsFile = memo(() => {
     <div>
       <p>Pending {pending}</p>
       <button onClick={stop}>Stop</button>
+    </div>
+  );
+});
+
+const IngestEvent = memo(() => {
+  const [json, setJSON] = useState("");
+  const add = () => {
+    try {
+      const event = JSON.parse(json) as Event;
+      addEvent(db, event);
+      setJSON("");
+    } catch (e) {}
+  };
+
+  return (
+    <div>
+      <textarea
+        value={json}
+        onChange={(e) => setJSON(e.target.value)}
+        cols={100}
+        rows={15}
+        placeholder="event json"
+      />
+      <br />
+      <button onClick={add}>Add</button>
     </div>
   );
 });
@@ -250,7 +267,12 @@ const QueryEvents = memo(() => {
     try {
       const start = new Date().valueOf();
       const filter = JSON.parse(query) as Filter;
-      setResults(await getEventsForFilters(db, [filter]));
+      const events = await getEventsForFilters(db, [filter]);
+      updateUsed(
+        db,
+        events.map((e) => e.id),
+      );
+      setResults(events);
       const end = new Date().valueOf();
       setTime(end - start);
     } catch (e) {
@@ -283,6 +305,7 @@ function App() {
       }}
     >
       <IngestEventsFile />
+      <IngestEvent />
       <CountEvents />
       <TopPubkeys />
       <QueryEvents />

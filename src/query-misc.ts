@@ -1,7 +1,6 @@
-import { IDBPDatabase } from "idb";
-import { Schema } from "./schema";
+import { NostrIDB } from "./schema.js";
 
-export async function countEventsByPubkey(db: IDBPDatabase<Schema>) {
+export async function countEventsByAllPubkeys(db: NostrIDB) {
   let cursor = await db
     .transaction("events", "readonly")
     .objectStore("events")
@@ -19,6 +18,14 @@ export async function countEventsByPubkey(db: IDBPDatabase<Schema>) {
   return counts;
 }
 
-export function countEvents(db: IDBPDatabase<Schema>) {
+export async function countEventsByPubkey(db: NostrIDB, pubkey: string) {
+  return await db
+    .transaction("events", "readonly")
+    .objectStore("events")
+    .index("pubkey")
+    .count(pubkey);
+}
+
+export function countEvents(db: NostrIDB) {
   return db.transaction("events", "readonly").store.count();
 }
