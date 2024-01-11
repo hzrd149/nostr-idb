@@ -1,6 +1,6 @@
-import { openDatabase } from "../../src/index";
+import { openDB } from "../../src/index";
 
-const db = await openDatabase();
+const db = await openDB();
 
 // @ts-ignore
 window.db = db;
