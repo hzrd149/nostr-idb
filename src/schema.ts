@@ -9,6 +9,7 @@ export interface Schema extends DBSchema {
     value: {
       event: Event;
       tags: string[];
+      identifier?: string;
     };
     indexes: {
       id: string;
@@ -16,6 +17,7 @@ export interface Schema extends DBSchema {
       kind: number;
       create_at: number;
       tags: string;
+      addressPointer: [number, string, string | undefined];
     };
   };
   seen: {

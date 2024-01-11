@@ -7,17 +7,9 @@ import {
 } from "react";
 import "./App.css";
 import { Event, Filter } from "nostr-tools";
-import dayjs from "dayjs";
 
-import db from "./db";
-import {
-  addEvent,
-  createWriteTransaction,
-  updateUsed,
-  countEventsByAllPubkeys,
-  countEvents,
-  getEventsForFilters,
-} from "../../src/index";
+import db, { relay } from "./instance";
+import { addEvent, countEventsByPubkeys, countEvents } from "../../src/index";
 
 const TopPubkeys = memo(() => {
   const [loading, setLoading] = useState(false);
@@ -25,7 +17,7 @@ const TopPubkeys = memo(() => {
   const update = useCallback(() => {
     setLoading(true);
     console.time("Counting events by pubkey");
-    countEventsByAllPubkeys(db)
+    countEventsByPubkeys(db)
       .then((counts) => {
         const top = Array.from(Object.entries(counts))
           .sort((a, b) => b[1] - a[1])
@@ -89,17 +81,14 @@ const IngestEventsFile = memo(() => {
       setPending(work.length);
 
       async function submitBatch() {
-        const trans = createWriteTransaction(db);
         for (let i = 0; i < BATCH_COUNT; i++) {
           const line = work.pop();
           if (!line) break;
           try {
             const event = JSON.parse(line) as Event;
-            addEvent(db, event, trans);
+            relay.publish(event);
           } catch (e) {}
         }
-
-        await trans.commit();
 
         if (work.length > 0) {
           setRunning(window.requestIdleCallback(submitBatch));
@@ -183,16 +172,19 @@ const EXAMPLE_QUERY = `
 `.trim();
 
 const QueryForm = memo(
-  ({ onSubmit }: { onSubmit: (query: string) => Promise<any> }) => {
+  ({
+    onSubmit,
+    subscribed,
+  }: {
+    subscribed?: boolean;
+    onSubmit: (query: string) => Promise<any>;
+  }) => {
     const [query, setQuery] = useState(EXAMPLE_QUERY);
 
-    const [loading, setLoading] = useState(false);
     const handleSubmit = useCallback<FormEventHandler>(
       async (e) => {
         e.preventDefault();
-        setLoading(true);
         await onSubmit(query);
-        setLoading(false);
       },
       [query],
     );
@@ -209,7 +201,7 @@ const QueryForm = memo(
           />
           <br />
 
-          <button type="submit">{loading ? "Loading..." : "Run Query"}</button>
+          <button type="submit">{subscribed ? "Update" : "Subscribe"}</button>
         </form>
       </>
     );
@@ -221,60 +213,20 @@ export function truncatedId(str: string, keep = 6) {
   return str.substring(0, keep) + "..." + str.substring(str.length - keep);
 }
 
-const EventTable = memo(({ events }: { events: Event[] }) => {
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Id ({events.length})</th>
-          <th>Pubkey</th>
-          <th>Kind</th>
-          <th>Created</th>
-          <th>Content</th>
-        </tr>
-      </thead>
-      <tbody style={{ whiteSpace: "pre", verticalAlign: "initial" }}>
-        {events.map((event) => (
-          <tr key={event.id}>
-            <td>{truncatedId(event.id)}</td>
-            <td>{truncatedId(event.pubkey)}</td>
-            <td>{event.kind}</td>
-            <td>
-              {dayjs.unix(event.created_at).format("LL")} ({event.created_at})
-            </td>
-            <td style={{ textAlign: "left" }}>{event.content.slice(0, 32)}</td>
-            <td style={{ textAlign: "left" }}>
-              <ul>
-                {event.tags.map((tag, i) => (
-                  <li key={tag.join(":") + "-" + i}>
-                    {JSON.stringify([tag[0], tag[1]])}
-                  </li>
-                ))}
-              </ul>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-});
-
 const QueryEvents = memo(() => {
-  const [results, setResults] = useState<Event[]>();
-  const [time, setTime] = useState(0);
+  const [sub, setSub] = useState<{ close: () => void }>();
+  const [results, setResults] = useState<Event[]>([]);
 
   const runQuery = useCallback(async (query: string) => {
     try {
-      const start = new Date().valueOf();
       const filter = JSON.parse(query) as Filter;
-      const events = await getEventsForFilters(db, [filter]);
-      updateUsed(
-        db,
-        events.map((e) => e.id),
-      );
-      setResults(events);
-      const end = new Date().valueOf();
-      setTime(end - start);
+      setSub((current) => {
+        if (current) current.close();
+        return relay.subscribe([filter], {
+          onevent: (e) => setResults((arr) => arr.concat(e)),
+        });
+      });
+      setResults([]);
     } catch (e) {
       if (e instanceof Error) alert(e.message);
     }
@@ -283,13 +235,23 @@ const QueryEvents = memo(() => {
   return (
     <>
       <h4>Query Events</h4>
-      <QueryForm onSubmit={runQuery} />
-      {results && (
-        <>
-          <p>Took {time / 1000}s</p>
-          <EventTable events={results} />
-        </>
-      )}
+      <QueryForm onSubmit={runQuery} subscribed={!!sub} />
+      <div
+        style={{
+          whiteSpace: "pre",
+          overflow: "auto",
+          width: "90vw",
+          maxHeight: "90vh",
+          textAlign: "left",
+        }}
+      >
+        {results.map((e) => (
+          <div key={e.id} style={{ fontFamily: "monospace" }}>
+            {e.created_at}: kind {e.kind} from {e.pubkey} |{" "}
+            {e.content.replace(/\n/g, "")}
+          </div>
+        ))}
+      </div>
     </>
   );
 });

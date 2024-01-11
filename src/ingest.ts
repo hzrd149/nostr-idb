@@ -4,10 +4,9 @@ import { Event, validateEvent } from "nostr-tools";
 import type { NostrIDB, Schema } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
 
-export function createWriteTransaction(db: NostrIDB) {
-  return db.transaction("events", "readwrite");
-}
-
+/**
+ * Returns an events tags as an array of string for indexing
+ */
 export function getEventTags(event: Event) {
   return event.tags
     .filter(
@@ -16,16 +15,44 @@ export function getEventTags(event: Event) {
     .map((t) => t[0] + t[1]);
 }
 
+// based on replaceable kinds from https://github.com/nostr-protocol/nips/blob/master/01.md#kinds
+export function isReplaceable(kind: number) {
+  return (
+    (kind >= 30000 && kind < 40000) ||
+    (kind >= 10000 && kind < 20000) ||
+    kind === 0 ||
+    kind === 3 ||
+    kind === 41
+  );
+}
+
+export type ReplaceableEventAddress = {
+  kind: number;
+  pubkey: string;
+  // identifier is optional because k10000 events and k0, k3
+  identifier?: string;
+};
+function getReplaceableEventAddress(
+  event: Event,
+): ReplaceableEventAddress | undefined {
+  // only create addresses for replaceable events
+  if (!isReplaceable(event.kind)) return undefined;
+  // get d tag
+  const identifier = event.tags.find((t) => t[0] === "d" && t[1])?.[1];
+  return { kind: event.kind, pubkey: event.pubkey, identifier };
+}
+
 export async function addEvent(
   db: NostrIDB,
   event: Event,
   transaction?: IDBPTransaction<Schema, ["events"], "readwrite">,
 ) {
   if (!validateEvent(event)) throw new Error("Invalid Event");
-  const trans = transaction || createWriteTransaction(db);
+  const trans = transaction || db.transaction("events", "readwrite");
   trans.objectStore("events").put({
     event,
     tags: getEventTags(event),
+    identifier: getReplaceableEventAddress(event)?.identifier,
   });
 
   if (!transaction) await trans.commit();
