@@ -32,7 +32,7 @@ export type SimpleSubscription = SimpleSubscriptionOptions & {
 export type CacheRelayOptions = {
   /** Defaults to 1000 */
   batchWrite?: number;
-  /** Defaults to 1000 */
+  /** Defaults to 100 */
   writeInterval?: number;
   /** number of indexes to cache in memory. defaults to 1000 */
   cacheIndexes?: number;
@@ -40,7 +40,7 @@ export type CacheRelayOptions = {
 
 const defaultOptions: CacheRelayOptions = {
   batchWrite: 1000,
-  writeInterval: 1000,
+  writeInterval: 100,
   cacheIndexes: 1000,
 };
 

@@ -5,4 +5,7 @@ import react from "@vitejs/plugin-react-swc";
 export default defineConfig({
   root: "example",
   plugins: [react()],
+  build: {
+    target: "es2022",
+  },
 });
