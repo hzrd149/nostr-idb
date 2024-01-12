@@ -2,6 +2,7 @@ import { Event, Filter, matchFilters } from "nostr-tools";
 import { NostrIDB } from "./schema";
 import { WriteQueue } from "./write-queue";
 import { countEventsForFilters, getEventsForFilters } from "./query-filter";
+import { sortByDate } from "./utils";
 
 export interface SimpleRelay {
   url: string;
@@ -21,9 +22,22 @@ export type SimpleSubscriptionOptions = {
   oneose?: () => void;
   onclose?: (reason: string) => void;
 };
-export type SimpleSubscription = {
+export type SimpleSubscription = SimpleSubscriptionOptions & {
   id: string;
+  filters: Filter[];
   close(message?: string): void;
+};
+
+export type CacheRelayOptions = {
+  /** Defaults to 1000 */
+  batchWrite?: number;
+  /** Defaults to 1000 */
+  writeInterval?: number;
+};
+
+const defaultOptions: CacheRelayOptions = {
+  batchWrite: 1000,
+  writeInterval: 1000,
 };
 
 export class CacheRelay implements SimpleRelay {
@@ -34,6 +48,7 @@ export class CacheRelay implements SimpleRelay {
     return !!this.interval;
   }
 
+  private options: CacheRelayOptions;
   private interval?: number;
   private db: NostrIDB;
   private writeQueue: WriteQueue;
@@ -45,16 +60,16 @@ export class CacheRelay implements SimpleRelay {
     }
   > = new Set();
 
-  constructor(db: NostrIDB) {
+  constructor(db: NostrIDB, opts: CacheRelayOptions = {}) {
     this.db = db;
     this.writeQueue = new WriteQueue(db);
+    this.options = { ...defaultOptions, ...opts };
   }
 
   public async connect(): Promise<void> {
-    this.interval = window.setInterval(
-      this.writeQueue.flush.bind(this.writeQueue),
-      1000,
-    );
+    this.interval = window.setInterval(() => {
+      this.writeQueue.flush(this.options.batchWrite);
+    }, this.options.writeInterval);
   }
   public async close() {
     if (this.interval) {
@@ -84,6 +99,33 @@ export class CacheRelay implements SimpleRelay {
     return await countEventsForFilters(this.db, filters);
   }
 
+  private async executeSubscription(sub: SimpleSubscription) {
+    // load any events from the write queue
+    const eventsFromQueue = this.writeQueue.queue.filter((e) =>
+      matchFilters(sub.filters, e),
+    );
+
+    // get events
+    await getEventsForFilters(this.db, sub.filters).then((filterEvents) => {
+      if (sub.onevent) {
+        const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+
+        const events =
+          eventsFromQueue.length > 0
+            ? [
+                ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+                ...eventsFromQueue,
+              ].sort(sortByDate)
+            : filterEvents;
+
+        for (const event of events) {
+          sub.onevent(event);
+        }
+      }
+      if (sub.oneose) sub.oneose();
+    });
+  }
+
   public subscribe(
     filters: Filter[],
     options: Partial<SimpleSubscriptionOptions>,
@@ -91,23 +133,17 @@ export class CacheRelay implements SimpleRelay {
     const id = this.nextId++;
 
     const sub = {
-      id,
-      onclose: options.onclose,
-      onevent: options.onevent,
-      oneose: options.oneose,
+      id: String(id),
       filters,
+      close: () => this.subscriptions.delete(sub),
+      fire: () => this.executeSubscription(sub),
+      ...options,
     };
 
     this.subscriptions.add(sub);
 
-    // get events
-    getEventsForFilters(this.db, filters).then((events) => {
-      for (const event of events) {
-        if (sub.onevent) sub.onevent(event);
-      }
-      if (sub.oneose) sub.oneose();
-    });
+    this.executeSubscription(sub);
 
-    return { id: String(id), close: () => this.subscriptions.delete(sub) };
+    return sub;
   }
 }

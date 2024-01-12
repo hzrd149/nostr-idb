@@ -29,6 +29,8 @@ export class WriteQueue {
       this.db,
       events.map((e) => e.id),
     );
+
+    return events.length;
   }
 
   clear() {

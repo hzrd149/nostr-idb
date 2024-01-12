@@ -1,6 +1,7 @@
 import type { Event, Filter } from "nostr-tools";
 import type { NostrIDB } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
+import { sortByDate } from "./utils";
 
 export function queryForPubkeys(db: NostrIDB, authors: Filter["authors"] = []) {
   const ids = new Set<string>();
@@ -148,7 +149,7 @@ async function loadEventsById(db: NostrIDB, ids: string[], filters: Filter[]) {
   const promises = Array.from(ids).map((id) => index.get(id).then(handleEntry));
 
   const sorted = await Promise.all(promises).then(() =>
-    events.sort((a, b) => b.created_at - a.created_at),
+    events.sort(sortByDate),
   );
   trans.commit();
 
