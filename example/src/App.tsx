@@ -219,14 +219,18 @@ const QueryEvents = memo(() => {
 
   const runQuery = useCallback(async (query: string) => {
     try {
+      console.time("Query");
+      setResults([]);
       const filter = JSON.parse(query) as Filter;
       setSub((current) => {
         if (current) current.close();
         return relay.subscribe([filter], {
           onevent: (e) => setResults((arr) => arr.concat(e)),
+          oneose() {
+            console.timeEnd("Query");
+          },
         });
       });
-      setResults([]);
     } catch (e) {
       if (e instanceof Error) alert(e.message);
     }

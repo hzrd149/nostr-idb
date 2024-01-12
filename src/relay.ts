@@ -3,6 +3,7 @@ import { NostrIDB } from "./schema";
 import { WriteQueue } from "./write-queue";
 import { countEventsForFilters, getEventsForFilters } from "./query-filter";
 import { sortByDate } from "./utils";
+import { IndexCache } from "./index-cache";
 
 export interface SimpleRelay {
   url: string;
@@ -33,11 +34,14 @@ export type CacheRelayOptions = {
   batchWrite?: number;
   /** Defaults to 1000 */
   writeInterval?: number;
+  /** number of indexes to cache in memory. defaults to 1000 */
+  cacheIndexes?: number;
 };
 
 const defaultOptions: CacheRelayOptions = {
   batchWrite: 1000,
   writeInterval: 1000,
+  cacheIndexes: 1000,
 };
 
 export class CacheRelay implements SimpleRelay {
@@ -52,6 +56,7 @@ export class CacheRelay implements SimpleRelay {
   private interval?: number;
   private db: NostrIDB;
   private writeQueue: WriteQueue;
+  private indexCache: IndexCache;
 
   private nextId = 0;
   private subscriptions: Set<
@@ -64,6 +69,8 @@ export class CacheRelay implements SimpleRelay {
     this.db = db;
     this.writeQueue = new WriteQueue(db);
     this.options = { ...defaultOptions, ...opts };
+    this.indexCache = new IndexCache();
+    this.indexCache.max = this.options.cacheIndexes;
   }
 
   public async connect(): Promise<void> {
@@ -80,6 +87,7 @@ export class CacheRelay implements SimpleRelay {
 
   public async publish(event: Event): Promise<string> {
     this.writeQueue.addEvent(event);
+    this.indexCache.addEventToIndexes(event);
 
     let subs = 0;
     for (const { onevent, filters } of this.subscriptions) {
@@ -106,24 +114,26 @@ export class CacheRelay implements SimpleRelay {
     );
 
     // get events
-    await getEventsForFilters(this.db, sub.filters).then((filterEvents) => {
-      if (sub.onevent) {
-        const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+    await getEventsForFilters(this.db, sub.filters, this.indexCache).then(
+      (filterEvents) => {
+        if (sub.onevent) {
+          const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
 
-        const events =
-          eventsFromQueue.length > 0
-            ? [
-                ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
-                ...eventsFromQueue,
-              ].sort(sortByDate)
-            : filterEvents;
+          const events =
+            eventsFromQueue.length > 0
+              ? [
+                  ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+                  ...eventsFromQueue,
+                ].sort(sortByDate)
+              : filterEvents;
 
-        for (const event of events) {
-          sub.onevent(event);
+          for (const event of events) {
+            sub.onevent(event);
+          }
         }
-      }
-      if (sub.oneose) sub.oneose();
-    });
+        if (sub.oneose) sub.oneose();
+      },
+    );
   }
 
   public subscribe(

@@ -2,65 +2,129 @@ import type { Event, Filter } from "nostr-tools";
 import type { NostrIDB } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
 import { sortByDate } from "./utils";
+import { IndexCache } from "./index-cache";
 
-export function queryForPubkeys(db: NostrIDB, authors: Filter["authors"] = []) {
+export function queryForPubkeys(
+  db: NostrIDB,
+  authors: Filter["authors"] = [],
+  indexCache?: IndexCache,
+) {
+  const loaded: string[] = [];
   const ids = new Set<string>();
+
+  if (indexCache) {
+    for (const pubkey of authors) {
+      const cached = indexCache.getPubkeyIndex(pubkey);
+      if (cached) {
+        for (const id of cached) ids.add(id);
+        loaded.push(pubkey);
+      }
+    }
+  }
+
+  // all indexes where loaded from indexCache
+  if (loaded.length === authors.length) return ids;
+
+  // load remaining indexes from db
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
   const index = objectStore.index("pubkey");
 
-  const handleEvents = (result: string[]) => {
+  const handleResults = (pubkey: string, result: string[]) => {
     for (const id of result) ids.add(id);
+    // add index to cache
+    if (indexCache) indexCache.setPubkeyIndex(pubkey, new Set(result));
   };
 
-  const promises = authors.map((pubkey) =>
-    index.getAllKeys(pubkey).then(handleEvents),
-  );
+  const promises = authors
+    .filter((p) => !loaded.includes(p))
+    .map((pubkey) =>
+      index.getAllKeys(pubkey).then((r) => handleResults(pubkey, r)),
+    );
 
-  const result = Promise.all(promises).then(() => ids);
   trans.commit();
-
-  return result;
+  return Promise.all(promises).then(() => ids);
 }
 
-export function queryForTag(db: NostrIDB, tag: string, values: string[]) {
+export function queryForTag(
+  db: NostrIDB,
+  tag: string,
+  values: string[],
+  indexCache?: IndexCache,
+) {
+  const loaded: string[] = [];
   const ids = new Set<string>();
+
+  if (indexCache) {
+    for (const value of values) {
+      const cached = indexCache.getTagIndex(tag + value);
+      if (cached) {
+        for (const id of cached) ids.add(id);
+        loaded.push(value);
+      }
+    }
+  }
+
+  // all indexes where loaded from indexCache
+  if (loaded.length === values.length) return ids;
+
+  // load remaining indexes from db
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
   const index = objectStore.index("tags");
 
-  const handleEvents = (result: string[]) => {
+  const handleResults = (value: string, result: string[]) => {
     for (const id of result) ids.add(id);
+    // add index to cache
+    if (indexCache) indexCache.setTagIndex(tag + value, new Set(result));
   };
 
   const promises = values.map((v) =>
-    index.getAllKeys(tag + v).then(handleEvents),
+    index.getAllKeys(tag + v).then((r) => handleResults(v, r)),
   );
 
-  const result = Promise.all(promises).then(() => ids);
   trans.commit();
-
-  return result;
+  return Promise.all(promises).then(() => ids);
 }
 
-export function queryForKinds(db: NostrIDB, kinds: Filter["kinds"] = []) {
+export function queryForKinds(
+  db: NostrIDB,
+  kinds: Filter["kinds"] = [],
+  indexCache?: IndexCache,
+) {
+  const loaded: number[] = [];
   const ids = new Set<string>();
-  const trans = db.transaction("events", "readonly");
-  const objectStore = trans.objectStore("events");
-  const index = objectStore.index("kind");
 
-  const handleEvents = (result: string[]) => {
+  // load from indexCache
+  if (indexCache) {
+    for (const kind of kinds) {
+      const cached = indexCache.getKindIndex(kind);
+      if (cached) {
+        for (const id of cached) ids.add(id);
+        loaded.push(kind);
+      }
+    }
+  }
+
+  // all indexes where loaded from indexCache
+  if (loaded.length === kinds.length) return ids;
+
+  // load remaining indexes from db
+  const trans = db.transaction("events", "readonly");
+  const index = trans.objectStore("events").index("kind");
+
+  const handleResults = (kind: number, result: string[]) => {
     for (const id of result) ids.add(id);
+    // add index to cache
+    if (indexCache) indexCache.setKindIndex(kind, new Set(result));
   };
 
-  const promises = kinds.map((kind) =>
-    index.getAllKeys(kind).then(handleEvents),
-  );
+  const promises = kinds
+    .filter((k) => !loaded.includes(k))
+    .map((kind) => index.getAllKeys(kind).then((r) => handleResults(kind, r)));
 
-  const result = Promise.all(promises).then(() => ids);
   trans.commit();
-
-  return result;
+  return Promise.all(promises).then(() => ids);
 }
 
 export async function queryForTime(
@@ -83,6 +147,7 @@ export async function queryForTime(
 export async function getIdsForFilter(
   db: NostrIDB,
   filter: Filter,
+  indexCache?: IndexCache,
 ): Promise<Set<string>> {
   // search is not supported, return an empty set
   if (filter.search) return new Set();
@@ -105,11 +170,12 @@ export async function getIdsForFilter(
   for (const t of GENERIC_TAGS) {
     const key = `#${t}`;
     const values = filter[key as `#${string}`];
-    if (values?.length) and(await queryForTag(db, t, values));
+    if (values?.length) and(await queryForTag(db, t, values, indexCache));
   }
 
-  if (filter.authors) and(await queryForPubkeys(db, filter.authors));
-  if (filter.kinds) and(await queryForKinds(db, filter.kinds));
+  if (filter.authors)
+    and(await queryForPubkeys(db, filter.authors, indexCache));
+  if (filter.kinds) and(await queryForKinds(db, filter.kinds, indexCache));
 
   // query for time last if only one is set
   if (
@@ -122,13 +188,17 @@ export async function getIdsForFilter(
   return ids;
 }
 
-export async function getIdsForFilters(db: NostrIDB, filters: Filter[]) {
+export async function getIdsForFilters(
+  db: NostrIDB,
+  filters: Filter[],
+  indexCache?: IndexCache,
+) {
   if (filters.length === 0) throw new Error("No Filters");
 
   let ids: Set<string> | null = null;
 
   for (const filter of filters) {
-    const filterIds = await getIdsForFilter(db, filter);
+    const filterIds = await getIdsForFilter(db, filter, indexCache);
     if (!ids) ids = filterIds;
     else for (const id of ids) if (!filterIds.has(id)) ids.delete(id);
   }
@@ -161,22 +231,38 @@ async function loadEventsById(db: NostrIDB, ids: string[], filters: Filter[]) {
 
   return sorted;
 }
-export async function getEventsForFilter(db: NostrIDB, filter: Filter) {
-  const ids = await getIdsForFilter(db, filter);
+export async function getEventsForFilter(
+  db: NostrIDB,
+  filter: Filter,
+  indexCache?: IndexCache,
+) {
+  const ids = await getIdsForFilter(db, filter, indexCache);
   return await loadEventsById(db, Array.from(ids), [filter]);
 }
 
-export async function getEventsForFilters(db: NostrIDB, filters: Filter[]) {
-  const ids = await getIdsForFilters(db, filters);
+export async function getEventsForFilters(
+  db: NostrIDB,
+  filters: Filter[],
+  indexCache?: IndexCache,
+) {
+  const ids = await getIdsForFilters(db, filters, indexCache);
   return await loadEventsById(db, Array.from(ids), filters);
 }
 
-export async function countEventsForFilter(db: NostrIDB, filter: Filter) {
-  const ids = await getIdsForFilter(db, filter);
+export async function countEventsForFilter(
+  db: NostrIDB,
+  filter: Filter,
+  indexCache?: IndexCache,
+) {
+  const ids = await getIdsForFilter(db, filter, indexCache);
   return ids.size;
 }
 
-export async function countEventsForFilters(db: NostrIDB, filters: Filter[]) {
-  const ids = await getIdsForFilters(db, filters);
+export async function countEventsForFilters(
+  db: NostrIDB,
+  filters: Filter[],
+  indexCache?: IndexCache,
+) {
+  const ids = await getIdsForFilters(db, filters, indexCache);
   return ids.size;
 }
