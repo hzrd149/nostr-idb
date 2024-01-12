@@ -15,7 +15,7 @@ export interface Schema extends DBSchema {
       id: string;
       pubkey: string;
       kind: number;
-      create_at: number;
+      created_at: number;
       tags: string;
       addressPointer: [number, string, string | undefined];
     };

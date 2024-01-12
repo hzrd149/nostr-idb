@@ -75,7 +75,7 @@ export async function queryForTime(
   else if (until !== undefined) range = IDBKeyRange.upperBound(until);
   else throw new Error("Missing since or until");
 
-  const arr = await db.getAllKeysFromIndex("events", "create_at", range);
+  const arr = await db.getAllKeysFromIndex("events", "created_at", range);
   const ids = new Set<string>(arr);
   return ids;
 }

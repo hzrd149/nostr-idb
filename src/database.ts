@@ -20,7 +20,7 @@ export async function openDB(
       events.createIndex("id", "event.id", { unique: true });
       events.createIndex("pubkey", "event.pubkey");
       events.createIndex("kind", "event.kind");
-      events.createIndex("create_at", "event.created_at");
+      events.createIndex("created_at", "event.created_at");
 
       events.createIndex("tags", "tags", { multiEntry: true });
 
