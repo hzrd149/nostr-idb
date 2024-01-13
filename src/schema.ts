@@ -9,7 +9,7 @@ export interface Schema extends DBSchema {
     value: {
       event: Event;
       tags: string[];
-      identifier?: string;
+      replaceableId?: string;
     };
     indexes: {
       id: string;
@@ -17,7 +17,7 @@ export interface Schema extends DBSchema {
       kind: number;
       created_at: number;
       tags: string;
-      addressPointer: [number, string, string | undefined];
+      replaceableId: string;
     };
   };
   seen: {

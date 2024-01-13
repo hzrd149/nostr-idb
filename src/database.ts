@@ -24,7 +24,7 @@ export async function openDB(
 
       events.createIndex("tags", "tags", { multiEntry: true });
 
-      events.createIndex("addressPointer", ["kind", "pubkey", "identifier"]);
+      events.createIndex("replaceableId", "replaceableId", { unique: true });
 
       const seen = db.createObjectStore("seen", { keyPath: "id" });
       seen.createIndex("date", "date");

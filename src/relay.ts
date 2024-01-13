@@ -1,4 +1,4 @@
-import { Event, Filter, matchFilters } from "nostr-tools";
+import { Event, Filter, kinds, matchFilters } from "nostr-tools";
 import { NostrIDB } from "./schema";
 import { WriteQueue } from "./write-queue";
 import { countEventsForFilters, getEventsForFilters } from "./query-filter";
@@ -86,8 +86,10 @@ export class CacheRelay implements SimpleRelay {
   }
 
   public async publish(event: Event): Promise<string> {
-    this.writeQueue.addEvent(event);
-    this.indexCache.addEventToIndexes(event);
+    if (kinds.isEphemeralKind(event.kind)) {
+      this.writeQueue.addEvent(event);
+      this.indexCache.addEventToIndexes(event);
+    }
 
     let subs = 0;
     for (const { onevent, filters } of this.subscriptions) {

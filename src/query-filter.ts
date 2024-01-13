@@ -209,19 +209,18 @@ export async function getIdsForFilters(
 }
 
 async function loadEventsById(db: NostrIDB, ids: string[], filters: Filter[]) {
-  const events: Event[] = [];
+  const eventBuffer: Event[] = [];
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
   const index = objectStore.index("id");
 
-  const handleEntry = (e?: { event: Event }) => e && events.push(e.event);
-
+  const handleEntry = (e?: { event: Event }) => e && eventBuffer.push(e.event);
   const promises = Array.from(ids).map((id) => index.get(id).then(handleEntry));
+  trans.commit();
 
   const sorted = await Promise.all(promises).then(() =>
-    events.sort(sortByDate),
+    eventBuffer.sort(sortByDate),
   );
-  trans.commit();
 
   let minLimit = Infinity;
   for (const filter of filters) {

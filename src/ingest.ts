@@ -26,21 +26,19 @@ export function isReplaceable(kind: number) {
   );
 }
 
+export function getReplaceableId(event: Event) {
+  if (!isReplaceable(event.kind)) return undefined;
+
+  const d = event.tags.find((t) => t[0] === "d")?.[1];
+  return `${event.kind}:${event.pubkey}:${d ?? ""}`;
+}
+
 export type ReplaceableEventAddress = {
   kind: number;
   pubkey: string;
   // identifier is optional because k10000 events and k0, k3
   identifier?: string;
 };
-function getReplaceableEventAddress(
-  event: Event,
-): ReplaceableEventAddress | undefined {
-  // only create addresses for replaceable events
-  if (!isReplaceable(event.kind)) return undefined;
-  // get d tag
-  const identifier = event.tags.find((t) => t[0] === "d" && t[1])?.[1];
-  return { kind: event.kind, pubkey: event.pubkey, identifier };
-}
 
 export async function addEvent(
   db: NostrIDB,
@@ -52,7 +50,7 @@ export async function addEvent(
   trans.objectStore("events").put({
     event,
     tags: getEventTags(event),
-    identifier: getReplaceableEventAddress(event)?.identifier,
+    replaceableId: getReplaceableId(event),
   });
 
   if (!transaction) await trans.commit();
