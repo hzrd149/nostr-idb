@@ -6,12 +6,12 @@ export async function getEventsFromAddressPointers(
   pointers: { kind: number; pubkey: string; identifier?: string }[],
 ) {
   const trans = db.transaction("events", "readonly");
-  const index = trans.objectStore("events").index("replaceableId");
+  const objectStore = trans.objectStore("events");
 
   const events: Record<string, Event> = {};
   const promises = pointers.map(async (pointer) => {
     const key = `${pointer.kind}:${pointer.pubkey}:${pointer.identifier ?? ""}`;
-    const row = await index.get(key);
+    const row = await objectStore.get(key);
 
     if (row) {
       const existing = events[key];

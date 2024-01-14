@@ -1,39 +1,54 @@
-import type { Event } from "nostr-tools";
-import { addEvents, updateUsed } from "./ingest";
+import { matchFilters, type Filter, type NostrEvent } from "nostr-tools";
+import { addEvents, getEventUID, updateUsed } from "./ingest";
 import { NostrIDB } from "./schema";
 
 export class WriteQueue {
   db: NostrIDB;
-  queue: Event[] = [];
+  private eventQueue: NostrEvent[] = [];
+  private lastUsedQueue = new Set<string>();
+
   constructor(db: NostrIDB) {
     this.db = db;
   }
 
-  addEvent(event: Event) {
-    this.queue.push(event);
+  addEvent(event: NostrEvent) {
+    this.eventQueue.push(event);
   }
-  addEvents(events: Event[]) {
-    this.queue.push(...events);
+  addEvents(events: NostrEvent[]) {
+    this.eventQueue.push(...events);
+  }
+
+  useEvent(event: NostrEvent) {
+    this.lastUsedQueue.add(getEventUID(event));
+  }
+  useEvents(events: NostrEvent[]) {
+    for (const event of events) this.lastUsedQueue.add(getEventUID(event));
+  }
+
+  matchPending(filters: Filter[]) {
+    return this.eventQueue.filter((e) => matchFilters(filters, e));
   }
 
   async flush(count = 1000) {
-    const events: Event[] = [];
-    for (let i = 0; i < count; i++) {
-      const event = this.queue.shift();
-      if (!event) break;
-      events.push(event);
+    if (this.eventQueue.length > 0) {
+      const events: NostrEvent[] = [];
+      for (let i = 0; i < count; i++) {
+        const event = this.eventQueue.shift();
+        if (!event) break;
+        events.push(event);
+      }
+      await addEvents(this.db, events);
     }
 
-    await addEvents(this.db, events);
-    await updateUsed(
-      this.db,
-      events.map((e) => e.id),
-    );
-
-    return events.length;
+    if (this.lastUsedQueue.size > 0) {
+      console.time("Save Used");
+      await updateUsed(this.db, this.lastUsedQueue);
+      console.timeEnd("Save Used");
+      this.lastUsedQueue.clear();
+    }
   }
 
   clear() {
-    this.queue = [];
+    this.eventQueue = [];
   }
 }

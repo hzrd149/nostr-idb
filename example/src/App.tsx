@@ -6,9 +6,9 @@ import {
   useState,
 } from "react";
 import "./App.css";
-import { Event, Filter } from "nostr-tools";
+import { Event, Filter, Relay } from "nostr-tools";
 
-import db, { relay } from "./instance";
+import db, { localRelay } from "./instance";
 import { addEvent, countEventsByPubkeys, countEvents } from "../../src/index";
 
 const TopPubkeys = memo(() => {
@@ -70,6 +70,65 @@ const CountEvents = memo(() => {
   );
 });
 
+const IngestEventsFromRelay = memo(() => {
+  const [url, setUrl] = useState("wss://nos.lol");
+  const [filter, setFilter] = useState(
+    JSON.stringify(
+      {
+        kinds: [0, 1, 6, 7],
+        limit: 500,
+        authors: [
+          "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
+          "82341f882b6eabcd2ba7f1ef90aad961cf074af15b9ef44a09f9d2a8fbfbe6a2",
+          "266815e0c9210dfa324c6cba3573b14bee49da4209a9456f9484e5106cd408a5",
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  const [loaded, setLoaded] = useState(0);
+
+  const load = useCallback(async () => {
+    const relay = new Relay(url);
+    try {
+      const parsedFilter = JSON.parse(filter) as Filter;
+      setLoaded(0);
+      await relay.connect();
+      relay.subscribe([parsedFilter], {
+        onevent: (e) => {
+          localRelay.publish(e);
+          setLoaded((v) => v + 1);
+        },
+        oneose: () => relay.close(),
+      });
+    } catch (e) {
+      relay.close();
+    }
+  }, [setLoaded, url, filter]);
+
+  return (
+    <div>
+      <input
+        type="url"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        style={{ width: "10rem", padding: ".5rem" }}
+        placeholder="wss://relay.example.com"
+      />
+      <br />
+      <textarea
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        cols={100}
+        rows={15}
+      />
+      <br />
+      <button onClick={load}>{loaded > 0 ? `${loaded} Loaded` : "Load"}</button>
+    </div>
+  );
+});
+
 const BATCH_COUNT = 1000;
 const IngestEventsFile = memo(() => {
   const [running, setRunning] = useState<number | null>();
@@ -86,7 +145,7 @@ const IngestEventsFile = memo(() => {
           if (!line) break;
           try {
             const event = JSON.parse(line) as Event;
-            relay.publish(event);
+            localRelay.publish(event);
           } catch (e) {}
         }
 
@@ -224,7 +283,7 @@ const QueryEvents = memo(() => {
       const filter = JSON.parse(query) as Filter;
       setSub((current) => {
         if (current) current.close();
-        return relay.subscribe([filter], {
+        return localRelay.subscribe([filter], {
           onevent: (e) => setResults((arr) => arr.concat(e)),
           oneose() {
             console.timeEnd("Query");
@@ -271,6 +330,7 @@ function App() {
       }}
     >
       <IngestEventsFile />
+      <IngestEventsFromRelay />
       <IngestEvent />
       <CountEvents />
       <TopPubkeys />

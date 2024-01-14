@@ -139,8 +139,9 @@ export async function queryForTime(
   else if (until !== undefined) range = IDBKeyRange.upperBound(until);
   else throw new Error("Missing since or until");
 
-  const arr = await db.getAllKeysFromIndex("events", "created_at", range);
-  const ids = new Set<string>(arr);
+  const ids = (
+    await db.getAllKeysFromIndex("events", "created_at", range)
+  ).reverse();
   return ids;
 }
 
@@ -155,17 +156,20 @@ export async function getIdsForFilter(
   if (filter.ids) return new Set(filter.ids);
 
   let ids: Set<string> | null = null;
-  const and = (set: Set<string>) => {
+  const and = (iterable: Iterable<string>) => {
+    const set = iterable instanceof Set ? iterable : new Set(iterable);
     if (!ids) ids = set;
-    for (const id of ids) {
-      if (!set.has(id)) ids.delete(id);
-    }
+    else for (const id of ids) if (!set.has(id)) ids.delete(id);
     return ids;
   };
 
-  // query for time first if both are set
-  if (filter.since && filter.until)
-    and(await queryForTime(db, filter.since, filter.until));
+  let timeFilterIds: string[] | null = null;
+
+  // query for time first if since is set
+  if (filter.since) {
+    timeFilterIds = await queryForTime(db, filter.since, filter.until);
+    and(timeFilterIds);
+  }
 
   for (const t of GENERIC_TAGS) {
     const key = `#${t}`;
@@ -177,12 +181,21 @@ export async function getIdsForFilter(
     and(await queryForPubkeys(db, filter.authors, indexCache));
   if (filter.kinds) and(await queryForKinds(db, filter.kinds, indexCache));
 
-  // query for time last if only one is set
-  if (
-    (filter.since === undefined && filter.until) ||
-    (filter.since && filter.until === undefined)
-  )
-    and(await queryForTime(db, filter.since, filter.until));
+  // query for time last if only until is set
+  if (filter.since === undefined && filter.until) {
+    timeFilterIds = await queryForTime(db, filter.since, filter.until);
+    and(timeFilterIds);
+  }
+
+  // if the filter queried on time and has a limit. truncate the ids now
+  if (filter.limit && timeFilterIds) {
+    const limitIds = new Set<string>();
+    for (const id of timeFilterIds) {
+      if (limitIds.size >= filter.limit) break;
+      if (ids.has(id)) limitIds.add(id);
+    }
+    return limitIds;
+  }
 
   if (ids === null) throw new Error("Empty filter");
   return ids;
@@ -208,14 +221,19 @@ export async function getIdsForFilters(
   return ids;
 }
 
-async function loadEventsById(db: NostrIDB, ids: string[], filters: Filter[]) {
+async function loadEventsByUID(
+  db: NostrIDB,
+  uids: string[],
+  filters: Filter[],
+) {
   const eventBuffer: Event[] = [];
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
-  const index = objectStore.index("id");
 
   const handleEntry = (e?: { event: Event }) => e && eventBuffer.push(e.event);
-  const promises = Array.from(ids).map((id) => index.get(id).then(handleEntry));
+  const promises = Array.from(uids).map((uid) =>
+    objectStore.get(uid).then(handleEntry),
+  );
   trans.commit();
 
   const sorted = await Promise.all(promises).then(() =>
@@ -230,13 +248,14 @@ async function loadEventsById(db: NostrIDB, ids: string[], filters: Filter[]) {
 
   return sorted;
 }
+
 export async function getEventsForFilter(
   db: NostrIDB,
   filter: Filter,
   indexCache?: IndexCache,
 ) {
   const ids = await getIdsForFilter(db, filter, indexCache);
-  return await loadEventsById(db, Array.from(ids), [filter]);
+  return await loadEventsByUID(db, Array.from(ids), [filter]);
 }
 
 export async function getEventsForFilters(
@@ -245,7 +264,7 @@ export async function getEventsForFilters(
   indexCache?: IndexCache,
 ) {
   const ids = await getIdsForFilters(db, filters, indexCache);
-  return await loadEventsById(db, Array.from(ids), filters);
+  return await loadEventsByUID(db, Array.from(ids), filters);
 }
 
 export async function countEventsForFilter(

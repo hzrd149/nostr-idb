@@ -3,6 +3,11 @@ import dayjs from "dayjs";
 import App from "./App.tsx";
 import "./index.css";
 
+import * as lib from "../../src/index";
+
+//@ts-ignore
+window.nostrIdb = lib;
+
 import localizedFormat from "dayjs/plugin/localizedFormat";
 dayjs.extend(localizedFormat);
 

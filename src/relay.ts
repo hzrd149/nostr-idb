@@ -86,7 +86,7 @@ export class CacheRelay implements SimpleRelay {
   }
 
   public async publish(event: Event): Promise<string> {
-    if (kinds.isEphemeralKind(event.kind)) {
+    if (!kinds.isEphemeralKind(event.kind)) {
       this.writeQueue.addEvent(event);
       this.indexCache.addEventToIndexes(event);
     }
@@ -111,9 +111,7 @@ export class CacheRelay implements SimpleRelay {
 
   private async executeSubscription(sub: SimpleSubscription) {
     // load any events from the write queue
-    const eventsFromQueue = this.writeQueue.queue.filter((e) =>
-      matchFilters(sub.filters, e),
-    );
+    const eventsFromQueue = this.writeQueue.matchPending(sub.filters);
 
     // get events
     await getEventsForFilters(this.db, sub.filters, this.indexCache).then(
@@ -131,6 +129,7 @@ export class CacheRelay implements SimpleRelay {
 
           for (const event of events) {
             sub.onevent(event);
+            this.writeQueue.useEvent(event);
           }
         }
         if (sub.oneose) sub.oneose();

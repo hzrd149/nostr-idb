@@ -5,11 +5,10 @@ export type NostrIDB = IDBPDatabase<Schema>;
 
 export interface Schema extends DBSchema {
   events: {
-    key: "id";
+    key: string;
     value: {
       event: Event;
       tags: string[];
-      replaceableId?: string;
     };
     indexes: {
       id: string;
@@ -17,30 +16,16 @@ export interface Schema extends DBSchema {
       kind: number;
       created_at: number;
       tags: string;
-      replaceableId: string;
-    };
-  };
-  seen: {
-    key: "id";
-    value: {
-      id: string;
-      date: number;
-      relays: string[];
-    };
-    indexes: {
-      id: string;
-      date: string;
-      relay: string;
     };
   };
   used: {
-    key: "id";
+    key: string;
     value: {
-      id: string;
+      uid: string;
       date: number;
     };
     indexes: {
-      id: string;
+      uid: string;
       date: string;
     };
   };

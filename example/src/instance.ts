@@ -1,15 +1,15 @@
 import { CacheRelay, openDB } from "../../src/index";
 
 const db = await openDB();
-const relay = new CacheRelay(db);
+const localRelay = new CacheRelay(db);
 
-await relay.connect();
+await localRelay.connect();
 
 // @ts-ignore
 window.db = db;
 
 // @ts-ignore
-window.relay = relay;
+window.localRelay = localRelay;
 
-export { relay };
+export { localRelay };
 export default db;

@@ -1,12 +1,10 @@
 import { IDBPTransaction } from "idb";
-import { Event, validateEvent } from "nostr-tools";
+import { Event, kinds, validateEvent } from "nostr-tools";
 
 import type { NostrIDB, Schema } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
 
-/**
- * Returns an events tags as an array of string for indexing
- */
+/** Returns an events tags as an array of string for indexing */
 export function getEventTags(event: Event) {
   return event.tags
     .filter(
@@ -15,30 +13,17 @@ export function getEventTags(event: Event) {
     .map((t) => t[0] + t[1]);
 }
 
-// based on replaceable kinds from https://github.com/nostr-protocol/nips/blob/master/01.md#kinds
-export function isReplaceable(kind: number) {
-  return (
-    (kind >= 30000 && kind < 40000) ||
-    (kind >= 10000 && kind < 20000) ||
-    kind === 0 ||
-    kind === 3 ||
-    kind === 41
-  );
+/** returns the events Unique ID */
+export function getEventUID(event: Event) {
+  if (
+    kinds.isReplaceableKind(event.kind) ||
+    kinds.isParameterizedReplaceableKind(event.kind)
+  ) {
+    const d = event.tags.find((t) => t[0] === "d")?.[1];
+    return `${event.kind}:${event.pubkey}:${d ?? ""}`;
+  }
+  return event.id;
 }
-
-export function getReplaceableId(event: Event) {
-  if (!isReplaceable(event.kind)) return undefined;
-
-  const d = event.tags.find((t) => t[0] === "d")?.[1];
-  return `${event.kind}:${event.pubkey}:${d ?? ""}`;
-}
-
-export type ReplaceableEventAddress = {
-  kind: number;
-  pubkey: string;
-  // identifier is optional because k10000 events and k0, k3
-  identifier?: string;
-};
 
 export async function addEvent(
   db: NostrIDB,
@@ -47,11 +32,13 @@ export async function addEvent(
 ) {
   if (!validateEvent(event)) throw new Error("Invalid Event");
   const trans = transaction || db.transaction("events", "readwrite");
-  trans.objectStore("events").put({
-    event,
-    tags: getEventTags(event),
-    replaceableId: getReplaceableId(event),
-  });
+  trans.objectStore("events").put(
+    {
+      event,
+      tags: getEventTags(event),
+    },
+    getEventUID(event),
+  );
 
   if (!transaction) await trans.commit();
 }
@@ -66,13 +53,13 @@ export async function addEvents(db: NostrIDB, events: Event[]) {
   await trans.commit();
 }
 
-export async function updateUsed(db: NostrIDB, ids: string[]) {
+export async function updateUsed(db: NostrIDB, uids: Iterable<string>) {
   const trans = db.transaction("used", "readwrite");
   const nowUnix = Math.floor(new Date().valueOf() / 1000);
 
-  for (const id of ids) {
+  for (const uid of uids) {
     trans.objectStore("used").put({
-      id,
+      uid,
       date: nowUnix,
     });
   }

@@ -16,7 +16,7 @@ export async function openDB(
   return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
     ...callbacks,
     upgrade(db, oldVersion, newVersion, transaction, event) {
-      const events = db.createObjectStore("events", { keyPath: "event.id" });
+      const events = db.createObjectStore("events");
       events.createIndex("id", "event.id", { unique: true });
       events.createIndex("pubkey", "event.pubkey");
       events.createIndex("kind", "event.kind");
@@ -24,13 +24,7 @@ export async function openDB(
 
       events.createIndex("tags", "tags", { multiEntry: true });
 
-      events.createIndex("replaceableId", "replaceableId", { unique: true });
-
-      const seen = db.createObjectStore("seen", { keyPath: "id" });
-      seen.createIndex("date", "date");
-      seen.createIndex("relay", "relays", { multiEntry: true });
-
-      const used = db.createObjectStore("used", { keyPath: "id" });
+      const used = db.createObjectStore("used", { keyPath: "uid" });
       used.createIndex("date", "date");
 
       if (callbacks?.upgrade)
@@ -49,5 +43,4 @@ export async function deleteDB(
 export async function clearDB(db: NostrIDB) {
   await db.clear("events");
   await db.clear("used");
-  await db.clear("seen");
 }
