@@ -7,7 +7,7 @@ import {
 import { NostrIDB, Schema } from "./schema.js";
 
 export const NOSTR_IDB_NAME = "nostr-idb";
-export const NOSTR_IDB_VERSION = 1;
+export const NOSTR_IDB_VERSION = 2;
 
 export async function openDB(
   name = NOSTR_IDB_NAME,
@@ -16,6 +16,15 @@ export async function openDB(
   return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
     ...callbacks,
     upgrade(db, oldVersion, newVersion, transaction, event) {
+      if (oldVersion < 2) {
+        debugger;
+        console.log("resetting DB");
+        db.deleteObjectStore("events");
+        db.deleteObjectStore("used");
+        // @ts-ignore
+        db.deleteObjectStore("seen");
+      }
+
       const events = db.createObjectStore("events");
       events.createIndex("id", "event.id", { unique: true });
       events.createIndex("pubkey", "event.pubkey");
