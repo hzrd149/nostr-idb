@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 1.1.1
+
+### Patch Changes
+
+- ec4b4e2: Fix event UID
+
 ## 1.1.0
 
 ### Minor Changes
