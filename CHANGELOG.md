@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 1.1.0
+
+### Minor Changes
+
+- 7004c24: Add simple prune methods
+
 ## 1.0.0
 
 ### Major Changes
