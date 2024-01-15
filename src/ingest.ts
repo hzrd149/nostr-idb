@@ -20,7 +20,9 @@ export function getEventUID(event: Event) {
     kinds.isParameterizedReplaceableKind(event.kind)
   ) {
     const d = event.tags.find((t) => t[0] === "d")?.[1];
-    return `${event.kind}:${event.pubkey}:${d ?? ""}`;
+    return d
+      ? `${event.kind}:${event.pubkey}:${d}`
+      : `${event.kind}:${event.pubkey}`;
   }
   return event.id;
 }
