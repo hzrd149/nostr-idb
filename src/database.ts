@@ -16,9 +16,7 @@ export async function openDB(
   return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
     ...callbacks,
     upgrade(db, oldVersion, newVersion, transaction, event) {
-      if (oldVersion < 2) {
-        debugger;
-        console.log("resetting DB");
+      if (oldVersion === 1) {
         db.deleteObjectStore("events");
         db.deleteObjectStore("used");
         // @ts-ignore

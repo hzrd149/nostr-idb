@@ -41,9 +41,7 @@ export class WriteQueue {
     }
 
     if (this.lastUsedQueue.size > 0) {
-      console.time("Save Used");
       await updateUsed(this.db, this.lastUsedQueue);
-      console.timeEnd("Save Used");
       this.lastUsedQueue.clear();
     }
   }

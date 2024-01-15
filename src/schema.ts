@@ -26,7 +26,7 @@ export interface Schema extends DBSchema {
     };
     indexes: {
       uid: string;
-      date: string;
+      date: number;
     };
   };
 }

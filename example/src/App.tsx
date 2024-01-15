@@ -9,7 +9,12 @@ import "./App.css";
 import { Event, Filter, Relay } from "nostr-tools";
 
 import db, { localRelay } from "./instance";
-import { addEvent, countEventsByPubkeys, countEvents } from "../../src/index";
+import {
+  addEvent,
+  countEventsByPubkeys,
+  countEvents,
+  pruneDatabaseToSize,
+} from "../../src/index";
 
 const TopPubkeys = memo(() => {
   const [loading, setLoading] = useState(false);
@@ -68,6 +73,19 @@ const CountEvents = memo(() => {
       {loading ? "Loading..." : `${count ?? "Count"} events`}
     </button>
   );
+});
+
+const PruneEvents = memo(() => {
+  const [loading, setLoading] = useState(false);
+  const update = useCallback(() => {
+    const str = prompt("Max Events", "5000");
+    if (!str) return;
+    const max = parseInt(str);
+    setLoading(true);
+    pruneDatabaseToSize(db, max).finally(() => setLoading(false));
+  }, [setLoading]);
+
+  return <button onClick={update}>{loading ? "Loading..." : "Prune"}</button>;
 });
 
 const IngestEventsFromRelay = memo(() => {
@@ -333,6 +351,7 @@ function App() {
       <IngestEventsFromRelay />
       <IngestEvent />
       <CountEvents />
+      <PruneEvents />
       <TopPubkeys />
       <QueryEvents />
     </div>

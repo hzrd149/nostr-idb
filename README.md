@@ -82,13 +82,13 @@ const events = await getEventsForFilters(db, [
 
 If possible its better to use `addEvents` and batch writes. since writing single events to the database can cause performance issues
 
-### getIdsForFilter / getIdsForFilters
-
-Similar to `getEventsForFilters` but instead of loading the whole event it just returns the ids
-
 ### countEventsForFilter / countEventsForFilters
 
 Similar to `getEventsForFilters` but returns just the number of events
+
+### pruneDatabaseToSize(db, limit)
+
+Removes the least used events until the database is under the size limit
 
 ## Index Cache
 

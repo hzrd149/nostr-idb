@@ -5,3 +5,4 @@ export * from "./ingest.js";
 export * from "./relay.js";
 export * from "./index-cache.js";
 export * from "./write-queue.js";
+export * from "./prune.js";
