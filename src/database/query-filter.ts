@@ -1,8 +1,8 @@
 import type { Event, Filter } from "nostr-tools";
 import type { NostrIDB } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
-import { sortByDate } from "./utils";
-import { IndexCache } from "./index-cache";
+import { sortByDate } from "../utils.js";
+import { IndexCache } from "../cache/index-cache.js";
 
 export function queryForPubkeys(
   db: NostrIDB,

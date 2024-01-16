@@ -16,6 +16,32 @@
   "files": [
     "dist"
   ],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./database": {
+      "import": "./dist/database/index.js",
+      "types": "./dist/database/index.d.ts"
+    },
+    "./relay": {
+      "import": "./dist/relay/index.js",
+      "types": "./dist/relay/index.d.ts"
+    },
+    "./worker": {
+      "import": "./dist/worker/index.js",
+      "types": "./dist/worker/index.d.ts"
+    },
+    "./worker/shared": {
+      "import": "./dist/worker/shared.js",
+      "types": "./dist/worker/shared.d.ts"
+    },
+    "./ws": {
+      "import": "./dist/ws/index.js",
+      "types": "./dist/ws/index.d.ts"
+    }
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc",
@@ -32,6 +58,7 @@
     "@types/react-dom": "^18.2.15",
     "@vitejs/plugin-react-swc": "^3.5.0",
     "dayjs": "^1.11.10",
+    "nanoid": "^5.0.4",
     "prettier": "^3.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

@@ -2,11 +2,12 @@
   "compilerOptions": {
     "outDir": "dist",
     "target": "ES2022",
-    "module": "ESNext",
+    "module": "NodeNext",
     "skipLibCheck": true,
-    "moduleResolution": "Node",
+    "moduleResolution": "NodeNext",
     "isolatedModules": true,
-    "declaration": true
+    "declaration": true,
+    "allowImportingTsExtensions": false
   },
   "include": ["src"],
   "exclude": ["example"]

@@ -1,5 +1,5 @@
-import { countEvents } from "./query-misc";
-import { NostrIDB } from "./schema";
+import { countEvents } from "./query-misc.js";
+import { NostrIDB } from "./schema.js";
 
 export async function pruneDatabaseToSize(
   db: NostrIDB,

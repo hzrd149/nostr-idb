@@ -1,5 +1,5 @@
 import { IDBPTransaction } from "idb";
-import { Event, kinds, validateEvent } from "nostr-tools";
+import { type Event, kinds, validateEvent } from "nostr-tools";
 
 import type { NostrIDB, Schema } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";

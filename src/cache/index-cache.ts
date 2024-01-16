@@ -1,5 +1,5 @@
-import { Event } from "nostr-tools";
-import { getEventTags } from "./ingest";
+import type { Event } from "nostr-tools";
+import { getEventTags } from "../database/ingest.js";
 
 export class IndexCache {
   kinds: Map<number, Set<string>> = new Map();

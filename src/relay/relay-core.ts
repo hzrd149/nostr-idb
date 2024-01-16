@@ -1,35 +1,25 @@
 import { Event, Filter, kinds, matchFilters } from "nostr-tools";
-import { NostrIDB } from "./schema";
-import { WriteQueue } from "./write-queue";
-import { countEventsForFilters, getEventsForFilters } from "./query-filter";
-import { sortByDate } from "./utils";
-import { IndexCache } from "./index-cache";
+import { nanoid } from "nanoid";
 
-export interface SimpleRelay {
-  url: string;
-  publish(event: Event): Promise<string>;
-  connected: boolean;
-  connect(): Promise<void>;
-  close(): void;
-  count(filters: Filter[], params?: { id?: string | null }): Promise<number>;
-  subscribe(
-    filters: Filter[],
-    options: SimpleSubscriptionOptions,
-  ): SimpleSubscription;
-}
+import { WriteQueue } from "../cache/write-queue.js";
+import { IndexCache } from "../cache/index-cache.js";
+import { NostrIDB } from "../database/schema.js";
+import { countEventsForFilters, getEventsForFilters } from "../index.js";
+import { sortByDate } from "../utils.js";
 
-export type SimpleSubscriptionOptions = {
+export type SubscriptionOptions = {
+  id?: string;
   onevent?: (event: Event) => void;
   oneose?: () => void;
   onclose?: (reason: string) => void;
 };
-export type SimpleSubscription = SimpleSubscriptionOptions & {
+export type Subscription = SubscriptionOptions & {
   id: string;
   filters: Filter[];
   close(message?: string): void;
 };
 
-export type CacheRelayOptions = {
+export type RelayCoreOptions = {
   /** Defaults to 1000 */
   batchWrite?: number;
   /** Defaults to 100 */
@@ -38,50 +28,49 @@ export type CacheRelayOptions = {
   cacheIndexes?: number;
 };
 
-const defaultOptions: CacheRelayOptions = {
+const defaultOptions: RelayCoreOptions = {
   batchWrite: 1000,
   writeInterval: 100,
   cacheIndexes: 1000,
 };
 
-export class CacheRelay implements SimpleRelay {
-  public get url(): string {
-    return "[Internal]";
-  }
-  public get connected() {
-    return !!this.interval;
+/** Main class that implements the relay logic */
+export class RelayCore {
+  private options: RelayCoreOptions;
+  private writeInterval?: number;
+  get running() {
+    return !!this.writeInterval;
   }
 
-  private options: CacheRelayOptions;
-  private interval?: number;
-  private db: NostrIDB;
   private writeQueue: WriteQueue;
   private indexCache: IndexCache;
+  db: NostrIDB;
 
-  private nextId = 0;
-  private subscriptions: Set<
-    SimpleSubscriptionOptions & {
+  private subscriptions: Map<
+    string,
+    SubscriptionOptions & {
       filters: Filter[];
     }
-  > = new Set();
+  > = new Map();
 
-  constructor(db: NostrIDB, opts: CacheRelayOptions = {}) {
+  constructor(db: NostrIDB, opts: RelayCoreOptions = {}) {
     this.db = db;
-    this.writeQueue = new WriteQueue(db);
     this.options = { ...defaultOptions, ...opts };
+
+    this.writeQueue = new WriteQueue(db);
     this.indexCache = new IndexCache();
     this.indexCache.max = this.options.cacheIndexes;
   }
 
-  public async connect(): Promise<void> {
-    this.interval = window.setInterval(() => {
+  public async start(): Promise<void> {
+    this.writeInterval = self.setInterval(() => {
       this.writeQueue.flush(this.options.batchWrite);
     }, this.options.writeInterval);
   }
-  public async close() {
-    if (this.interval) {
-      window.clearInterval(this.interval);
-      this.interval = undefined;
+  public async stop() {
+    if (this.writeInterval) {
+      self.clearInterval(this.writeInterval);
+      this.writeInterval = undefined;
     }
   }
 
@@ -92,9 +81,9 @@ export class CacheRelay implements SimpleRelay {
     }
 
     let subs = 0;
-    for (const { onevent, filters } of this.subscriptions) {
-      if (onevent && matchFilters(filters, event)) {
-        onevent(event);
+    for (const [id, sub] of this.subscriptions) {
+      if (sub.onevent && matchFilters(sub.filters, event)) {
+        sub.onevent(event);
         subs++;
       }
     }
@@ -102,14 +91,11 @@ export class CacheRelay implements SimpleRelay {
     return `Sent to ${subs} subscriptions`;
   }
 
-  public async count(
-    filters: Filter[],
-    params?: { id?: string | null },
-  ): Promise<number> {
+  public async count(filters: Filter[]): Promise<number> {
     return await countEventsForFilters(this.db, filters);
   }
 
-  private async executeSubscription(sub: SimpleSubscription) {
+  private async executeSubscription(sub: Subscription) {
     // load any events from the write queue
     const eventsFromQueue = this.writeQueue.matchPending(sub.filters);
 
@@ -137,24 +123,32 @@ export class CacheRelay implements SimpleRelay {
     );
   }
 
-  public subscribe(
+  subscribe(
     filters: Filter[],
-    options: Partial<SimpleSubscriptionOptions>,
-  ): SimpleSubscription {
-    const id = this.nextId++;
+    options: Partial<SubscriptionOptions>,
+  ): Subscription {
+    // remove any duplicate subscriptions
+    if (options.id && this.subscriptions.has(options.id))
+      this.subscriptions.delete(options.id);
+
+    const id = options.id || nanoid();
 
     const sub = {
-      id: String(id),
+      id,
       filters,
-      close: () => this.subscriptions.delete(sub),
+      close: () => this.subscriptions.delete(id),
       fire: () => this.executeSubscription(sub),
       ...options,
     };
 
-    this.subscriptions.add(sub);
+    this.subscriptions.set(id, sub);
 
     this.executeSubscription(sub);
 
     return sub;
+  }
+
+  unsubscribe(id: string) {
+    this.subscriptions.delete(id);
   }
 }

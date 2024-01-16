@@ -1,6 +1,6 @@
 import { matchFilters, type Filter, type NostrEvent } from "nostr-tools";
-import { addEvents, getEventUID, updateUsed } from "./ingest";
-import { NostrIDB } from "./schema";
+import { addEvents, getEventUID, updateUsed } from "../database/ingest.js";
+import { NostrIDB } from "../database/schema.js";
 
 export class WriteQueue {
   db: NostrIDB;

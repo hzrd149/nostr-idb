@@ -14,7 +14,7 @@ import {
   countEventsByPubkeys,
   countEvents,
   pruneDatabaseToSize,
-} from "../../src/index";
+} from "../../";
 
 const TopPubkeys = memo(() => {
   const [loading, setLoading] = useState(false);
@@ -301,10 +301,13 @@ const QueryEvents = memo(() => {
       const filter = JSON.parse(query) as Filter;
       setSub((current) => {
         if (current) current.close();
+
+        const eventsArray: Event[] = [];
         return localRelay.subscribe([filter], {
-          onevent: (e) => setResults((arr) => arr.concat(e)),
+          onevent: (e) => eventsArray.push(e),
           oneose() {
             console.timeEnd("Query");
+            setResults(eventsArray);
           },
         });
       });
