@@ -1,10 +1,19 @@
 <script context="module">
   import { WebSocket } from "../../dist/ws/index.js";
   window.WebSocket = WebSocket;
+  import NDK from "@nostr-dev-kit/ndk";
+
+  localStorage.debug = "ndk:*";
+
+  const ndk = new NDK({
+    enableOutboxModel: false,
+    autoConnectUserRelays: false,
+    autoFetchUserMutelist: false,
+  });
+  window.ndk = ndk;
 </script>
 
 <script lang="js">
-  import { AbstractRelay, Relay, verifiedSymbol } from "nostr-tools";
   import {
     LOCAL_RELAY_URI,
     SHARED_WORKER_RELAY_URI,
@@ -12,33 +21,18 @@
   } from "../../dist/ws/index.js";
   import EventLine from "../common/EventLine.svelte";
   import ImportEvents from "../common/ImportEvents.svelte";
-  import { onDestroy } from "svelte";
+  import { NDKRelaySet } from "@nostr-dev-kit/ndk";
 
   let verify = false;
-  let update = 0;
-  let connecting = false;
   let relayURL = LOCAL_RELAY_URI;
   let relay = null;
 
   $: {
-    if (relay?.connected) relay.close();
-    relay = verify
-      ? new Relay(relayURL)
-      : new AbstractRelay(relayURL, {
-          verifyEvent: (e) => (e[verifiedSymbol] = true),
-        });
+    ndk.pool.relays.forEach((r) => r.disconnect());
+    ndk.pool.removeRelay(relayURL);
+    relay = ndk.pool.getRelay(relayURL, true);
     window.relay = relay;
   }
-
-  async function toggleConnection() {
-    connecting = true;
-    if (relay.connected) await relay.close();
-    else await relay.connect();
-
-    connecting = false;
-    update++;
-  }
-  onDestroy(() => relay.close());
 
   let filterStr = JSON.stringify(
     {
@@ -54,43 +48,27 @@
     2,
   );
 
+  let loading = false;
   let events = [];
-  let count = null;
-  let sub = null;
-
   async function subscribe() {
-    if (!relay.connected) await toggleConnection();
-    events = [];
-    try {
-      if (sub) sub.close();
-      const filter = JSON.parse(filterStr);
-      let tmp = [];
-      console.time("Query");
-      sub = relay.subscribe([filter], {
-        onevent: (event) => {
-          tmp.push(event);
-        },
-        oneose: () => {
-          events = tmp;
-          count = events.length;
-          console.timeEnd("Query");
-        },
-      });
-    } catch (e) {
-      alert(e.message);
-    }
-  }
-
-  async function runCount() {
-    if (!relay.connected) await toggleConnection();
-    count = 0;
+    loading = true;
     events = [];
     try {
       const filter = JSON.parse(filterStr);
-      count = await relay.count(filter);
+      events = Array.from(
+        await ndk.fetchEvents(
+          filter,
+          {
+            skipVerification: true,
+            groupable: false,
+          },
+          NDKRelaySet.fromRelayUrls([relayURL], ndk),
+        ),
+      );
     } catch (e) {
       alert(e.message);
     }
+    loading = false;
   }
 </script>
 
@@ -100,13 +78,6 @@
     <option value={WORKER_RELAY_URI}>{WORKER_RELAY_URI}</option>
     <option value={SHARED_WORKER_RELAY_URI}>{SHARED_WORKER_RELAY_URI}</option>
   </select>
-  <button on:click={toggleConnection}
-    >{relay.connected
-      ? "Disconnect"
-      : connecting
-        ? "Connecting..."
-        : "Connect"}</button
-  >
   <label>
     <input type="checkbox" bind:checked={verify} />
     Verify events
@@ -125,11 +96,10 @@
     ></textarea>
     <br />
     <button on:click={subscribe} disabled={relay.connected}
-      >{sub ? "Update" : "Subscribe"}</button
+      >{loading ? "Loading..." : "Fetch Events"}</button
     >
-    <button on:click={runCount} disabled={relay.connected}>Count</button>
-    {#if count !== null}
-      <span>{count}</span>
+    {#if events.length > 0}
+      <span>{events.length}</span>
     {/if}
   </div>
   <div class="events">

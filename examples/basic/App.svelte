@@ -1,6 +1,14 @@
 <script context="module">
-  import { getEventsForFilter, openDB } from "../../dist/index.js";
-  let db = await openDB();
+  import {
+    IndexCache,
+    getEventsForFilter,
+    openDB,
+    pruneDatabaseToSize,
+  } from "../../dist/index.js";
+  const db = await openDB();
+  const indexCache = new IndexCache();
+
+  window.prune = (size = 5000) => pruneDatabaseToSize(db, size);
 </script>
 
 <script lang="js">
@@ -37,7 +45,7 @@
     try {
       const filter = JSON.parse(filterStr);
       console.time("Load Events");
-      events = await getEventsForFilter(db, filter);
+      events = await getEventsForFilter(db, filter, indexCache);
       console.timeEnd("Load Events");
     } catch (e) {
       alert(e.message);
@@ -49,7 +57,12 @@
 <main>
   <div>
     <h3>Load events from file</h3>
-    <ImportEvents handleEvents={(events) => addEvents(db, events)} />
+    <ImportEvents
+      handleEvents={(events) => {
+        addEvents(db, events);
+        events.forEach((e) => indexCache.addEventToIndexes(e));
+      }}
+    />
   </div>
 
   <div>

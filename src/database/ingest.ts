@@ -3,6 +3,10 @@ import { type Event, kinds, validateEvent } from "nostr-tools";
 
 import type { NostrIDB, Schema } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
+import {
+  isParameterizedReplaceableKind,
+  isReplaceableKind,
+} from "nostr-tools/kinds";
 
 /** Returns an events tags as an array of string for indexing */
 export function getEventTags(event: Event) {
@@ -27,32 +31,43 @@ export function getEventUID(event: Event) {
   return event.id;
 }
 
-export async function addEvent(
-  db: NostrIDB,
-  event: Event,
-  transaction?: IDBPTransaction<Schema, ["events"], "readwrite">,
-) {
-  if (!validateEvent(event)) throw new Error("Invalid Event");
-  const trans = transaction || db.transaction("events", "readwrite");
-  trans.objectStore("events").put(
-    {
-      event,
-      tags: getEventTags(event),
-    },
-    getEventUID(event),
-  );
-
-  if (!transaction) await trans.commit();
-}
-
 export async function addEvents(db: NostrIDB, events: Event[]) {
-  const trans = db.transaction("events", "readwrite");
+  // filter out invalid events
+  events = events.filter((event) => validateEvent(event));
 
-  for (const event of events) {
-    await addEvent(db, event, trans);
+  const replaceableEvents = events.filter(
+    (e) => isReplaceableKind(e.kind) || isParameterizedReplaceableKind(e.kind),
+  );
+  const existingEvents: Record<string, number> = {};
+  if (replaceableEvents.length > 0) {
+    const readTransaction = db.transaction("events", "readonly");
+    const promises = replaceableEvents.map((e) => {
+      const uid = getEventUID(e);
+      readTransaction.store
+        .get(uid)
+        .then((r) => r && (existingEvents[uid] = r.event.created_at));
+    });
+    readTransaction.commit();
+    await Promise.all(promises);
   }
 
-  await trans.commit();
+  const writeTransaction = db.transaction("events", "readwrite");
+  for (const event of events) {
+    const uid = getEventUID(event);
+
+    // if the event is replaceable, only write it if its newer
+    if (!existingEvents[uid] || event.created_at > existingEvents[uid]) {
+      writeTransaction.objectStore("events").put(
+        {
+          event,
+          tags: getEventTags(event),
+        },
+        uid,
+      );
+    }
+  }
+
+  await writeTransaction.commit();
 }
 
 export async function updateUsed(db: NostrIDB, uids: Iterable<string>) {

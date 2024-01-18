@@ -9,6 +9,7 @@ import {
 } from "../database/query-filter.js";
 import { sortByDate } from "../utils.js";
 import { nanoid } from "../lib/nanoid.js";
+import { logger } from "../debug.js";
 
 export type SubscriptionOptions = {
   id?: string;
@@ -36,6 +37,8 @@ const defaultOptions: RelayCoreOptions = {
   writeInterval: 100,
   cacheIndexes: 1000,
 };
+
+const log = logger.extend("relay");
 
 /** Main class that implements the relay logic */
 export class RelayCore {
@@ -66,6 +69,7 @@ export class RelayCore {
   }
 
   public async start(): Promise<void> {
+    log("Starting");
     this.writeInterval = self.setInterval(() => {
       this.writeQueue.flush(this.options.batchWrite);
     }, this.options.writeInterval);
@@ -74,6 +78,7 @@ export class RelayCore {
     if (this.writeInterval) {
       self.clearInterval(this.writeInterval);
       this.writeInterval = undefined;
+      log("Stopped");
     }
   }
 
@@ -99,6 +104,9 @@ export class RelayCore {
   }
 
   private async executeSubscription(sub: Subscription) {
+    const start = new Date().valueOf();
+    log(`Running ${sub.id}`, sub.filters);
+
     // load any events from the write queue
     const eventsFromQueue = this.writeQueue.matchPending(sub.filters);
 
@@ -120,6 +128,11 @@ export class RelayCore {
             sub.onevent(event);
             this.writeQueue.useEvent(event);
           }
+
+          const delta = new Date().valueOf() - start;
+          log(
+            `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
+          );
         }
         if (sub.oneose) sub.oneose();
       },
@@ -131,8 +144,9 @@ export class RelayCore {
     options: Partial<SubscriptionOptions>,
   ): Subscription {
     // remove any duplicate subscriptions
-    if (options.id && this.subscriptions.has(options.id))
+    if (options.id && this.subscriptions.has(options.id)) {
       this.subscriptions.delete(options.id);
+    }
 
     const id = options.id || nanoid();
 
@@ -152,6 +166,7 @@ export class RelayCore {
   }
 
   unsubscribe(id: string) {
+    log(`Closing ${id}`);
     this.subscriptions.delete(id);
   }
 }

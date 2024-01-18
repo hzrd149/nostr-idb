@@ -1,9 +1,14 @@
+import { logger } from "../debug.js";
 import { NostrIDBSharedWorker, NostrIDBWorker } from "../worker/index.js";
 import { AbstractWebSocket } from "./abstract-websocket.js";
 import { SHARED_WORKER_RELAY_URI, WORKER_RELAY_URI } from "./common.js";
 
-function handleWorkerStartup(ws: WorkerWebSocket | SharedWorkerWebSocket) {
+function handleWorkerStartup(
+  ws: WorkerWebSocket | SharedWorkerWebSocket,
+  log: debug.Debugger,
+) {
   ws.worker.onerror = () => {
+    log("Failed to start worker");
     const event = new Event("error");
     ws.readyState = ws.CLOSED;
     ws.onerror?.(event);
@@ -15,6 +20,7 @@ function handleWorkerStartup(ws: WorkerWebSocket | SharedWorkerWebSocket) {
     : ws.worker
   ).addEventListener("message", (e) => {
     if (e.data === "hello world") {
+      log("Received start message");
       ws.readyState = ws.OPEN;
       const event = new Event("open");
       ws.onopen?.(event);
@@ -22,6 +28,9 @@ function handleWorkerStartup(ws: WorkerWebSocket | SharedWorkerWebSocket) {
     }
   });
 }
+
+const workerLog = logger.extend("ws:worker");
+const sharedWorkerLog = logger.extend("ws:shared-worker");
 
 export class WorkerWebSocket extends AbstractWebSocket {
   worker: Worker;
@@ -35,10 +44,11 @@ export class WorkerWebSocket extends AbstractWebSocket {
     });
     this.worker = worker;
 
-    handleWorkerStartup(this);
+    handleWorkerStartup(this, workerLog);
   }
 
   close() {
+    workerLog("Stopping");
     this.worker.terminate();
     this.readyState = this.CLOSED;
     const event = new CloseEvent("close", { wasClean: true });
@@ -60,10 +70,11 @@ export class SharedWorkerWebSocket extends AbstractWebSocket {
     });
     this.worker = worker;
 
-    handleWorkerStartup(this);
+    handleWorkerStartup(this, sharedWorkerLog);
   }
 
   close() {
+    sharedWorkerLog("Disconnecting");
     this.worker.port.close();
     this.readyState = this.CLOSED;
     const event = new CloseEvent("close", { wasClean: true });

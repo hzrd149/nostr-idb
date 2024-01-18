@@ -9,6 +9,9 @@ import {
   AbstractWebSocket,
   AbstractWebSocketBackend,
 } from "./abstract-websocket.js";
+import { logger } from "../debug.js";
+
+const log = logger.extend("ws:local");
 
 /** This websocket will create a NostrIDB and RelayCore instance and run it in the window context */
 export class LocalWebSocket extends AbstractWebSocket {
@@ -28,12 +31,25 @@ export class LocalWebSocket extends AbstractWebSocket {
     openDB().then((db) => {
       this.db = db;
       this.core = new RelayCore(db);
+      this.core.start();
 
+      log("Database open");
       const event = new Event("open");
       this.onopen?.(event);
       this.dispatchEvent(event);
     });
 
+    log("Opening database");
     this.readyState = this.CONNECTING;
+  }
+
+  close() {
+    this.core.stop();
+    log(`Closed`);
+
+    this.readyState = this.CLOSED;
+    const event = new CloseEvent("close", { wasClean: true });
+    this.onclose?.(event);
+    this.dispatchEvent(event);
   }
 }

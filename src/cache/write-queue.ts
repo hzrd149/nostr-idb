@@ -1,6 +1,9 @@
 import { matchFilters, type Filter, type NostrEvent } from "nostr-tools";
 import { addEvents, getEventUID, updateUsed } from "../database/ingest.js";
 import { NostrIDB } from "../database/schema.js";
+import { logger } from "../debug.js";
+
+const log = logger.extend("cache:write");
 
 export class WriteQueue {
   db: NostrIDB;
@@ -13,9 +16,11 @@ export class WriteQueue {
 
   addEvent(event: NostrEvent) {
     this.eventQueue.push(event);
+    this.useEvent(event);
   }
   addEvents(events: NostrEvent[]) {
     this.eventQueue.push(...events);
+    this.useEvents(events);
   }
 
   useEvent(event: NostrEvent) {
@@ -38,6 +43,9 @@ export class WriteQueue {
         events.push(event);
       }
       await addEvents(this.db, events);
+      log(
+        `Wrote ${events.length} to database, ${this.eventQueue.length} events left`,
+      );
     }
 
     if (this.lastUsedQueue.size > 0) {

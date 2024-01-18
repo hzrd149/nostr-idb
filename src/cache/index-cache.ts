@@ -1,49 +1,70 @@
 import type { Event } from "nostr-tools";
 import { getEventTags } from "../database/ingest.js";
+import { logger } from "../debug.js";
+
+const log = logger.extend("cache:indexes");
+
+class Index<T> extends Set<string> {
+  type: "kind" | "pubkey" | "tag";
+  key: T;
+
+  constructor(
+    values: Iterable<string> | null,
+    type: "kind" | "pubkey" | "tag",
+    key: T,
+  ) {
+    super(values);
+    this.type = type;
+    this.key = key;
+  }
+}
 
 export class IndexCache {
-  kinds: Map<number, Set<string>> = new Map();
-  pubkeys: Map<string, Set<string>> = new Map();
-  tags: Map<string, Set<string>> = new Map();
+  kinds: Map<number, Index<number>> = new Map();
+  pubkeys: Map<string, Index<string>> = new Map();
+  tags: Map<string, Index<string>> = new Map();
 
   get count() {
     return this.kinds.size + this.pubkeys.size + this.tags.size;
   }
 
   max: number = 1000;
-  lastUsed: Set<string>[] = [];
-  private useIndex(index: Set<string>) {
+  lastUsed: Index<any>[] = [];
+  private useIndex(index: Index<any>) {
     const i = this.lastUsed.indexOf(index);
     if (i !== -1) this.lastUsed.splice(i, i + 1);
     this.lastUsed.push(index);
   }
 
-  getKindIndex(kind: number): Set<string> | undefined {
+  getKindIndex(kind: number): Index<number> | undefined {
     const index = this.kinds.get(kind);
     if (index) this.useIndex(index);
     return index;
   }
-  setKindIndex(kind: number, index: Set<string>) {
+  setKindIndex(kind: number, uids: Iterable<string>) {
+    const index = new Index<number>(uids, "kind", kind);
     this.kinds.set(kind, index);
     this.useIndex(index);
     this.pruneIndexes();
   }
-  getPubkeyIndex(pubkey: string): Set<string> | undefined {
+  getPubkeyIndex(pubkey: string): Index<string> | undefined {
     const index = this.pubkeys.get(pubkey);
     if (index) this.useIndex(index);
     return index;
   }
-  setPubkeyIndex(pubkey: string, index: Set<string>) {
+  setPubkeyIndex(pubkey: string, uids: Iterable<string>) {
+    const index = new Index<string>(uids, "pubkey", pubkey);
     this.pubkeys.set(pubkey, index);
     this.useIndex(index);
     this.pruneIndexes();
   }
-  getTagIndex(tagAndValue: string): Set<string> | undefined {
+  getTagIndex(tagAndValue: string): Index<string> | undefined {
     const index = this.tags.get(tagAndValue);
     if (index) this.useIndex(index);
     return index;
   }
-  setTagIndex(tagAndValue: string, index: Set<string>) {
+  setTagIndex(tagAndValue: string, uids: Iterable<string>) {
+    const index = new Index<string>(uids, "tag", tagAndValue);
     this.tags.set(tagAndValue, index);
     this.useIndex(index);
     this.pruneIndexes();
@@ -61,7 +82,21 @@ export class IndexCache {
 
   pruneIndexes() {
     while (this.lastUsed.length > 0 && this.lastUsed.length > this.max) {
-      this.lastUsed.shift();
+      const index = this.lastUsed.shift();
+      if (!index) return;
+      log(`Forgetting ${index.type}:${index.key}`);
+
+      switch (index.type) {
+        case "kind":
+          this.kinds.delete(index.key);
+          break;
+        case "pubkey":
+          this.pubkeys.delete(index.key);
+          break;
+        case "tag":
+          this.tags.delete(index.key);
+          break;
+      }
     }
   }
 }
