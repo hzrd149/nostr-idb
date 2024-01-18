@@ -1,5 +1,5 @@
 import { NostrIDB } from "../database/schema.js";
-import { openDB } from "../index.js";
+import { openDB } from "../database/database.js";
 import { RelayCore } from "../relay/relay-core.js";
 import {
   OutgoingMessage,

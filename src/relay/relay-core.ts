@@ -1,11 +1,14 @@
 import { Event, Filter, kinds, matchFilters } from "nostr-tools";
-import { nanoid } from "nanoid";
 
 import { WriteQueue } from "../cache/write-queue.js";
 import { IndexCache } from "../cache/index-cache.js";
 import { NostrIDB } from "../database/schema.js";
-import { countEventsForFilters, getEventsForFilters } from "../index.js";
+import {
+  getEventsForFilters,
+  countEventsForFilters,
+} from "../database/query-filter.js";
 import { sortByDate } from "../utils.js";
+import { nanoid } from "../lib/nanoid.js";
 
 export type SubscriptionOptions = {
   id?: string;

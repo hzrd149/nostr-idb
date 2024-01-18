@@ -1,6 +1,7 @@
 /** @lib WebWorker */
-import { NostrIDB } from "../database/schema.js";
-import { RelayCore, openDB } from "../index.js";
+import type { NostrIDB } from "../database/schema.js";
+import { openDB } from "../database/database.js";
+import { RelayCore } from "../relay/relay-core.js";
 import { connectRelayToMessagePort } from "./utils.js";
 
 let db: NostrIDB;
@@ -25,6 +26,5 @@ onconnect = async (event: MessageEvent) => {
   const core = await getRelay();
   connectRelayToMessagePort(core, port);
   port.start();
+  port.postMessage("hello world");
 };
-
-console.log("Worker started");

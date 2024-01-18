@@ -38,14 +38,13 @@ jobs:
       - name: Install dependencies
         run: yarn install
       - name: Build
-        run: yarn vite build
+        run: yarn build:examples
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload dist repository
-          path: "./example/dist"
+          path: "./public"
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

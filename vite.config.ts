@@ -1,12 +1,20 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import { resolve } from "path";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  root: "example",
+  root: "examples",
   base: "/nostr-idb",
-  plugins: [react()],
+  plugins: [svelte()],
   build: {
+    outDir: "../public",
     target: "es2022",
+    rollupOptions: {
+      input: {
+        local: resolve(__dirname, "examples/basic/index.html"),
+        "nostr-tools": resolve(__dirname, "examples/nostr-tools/index.html"),
+      },
+    },
   },
 });

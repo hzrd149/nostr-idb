@@ -1,9 +1,10 @@
+import {
+  LOCAL_RELAY_URI,
+  SHARED_WORKER_RELAY_URI,
+  WORKER_RELAY_URI,
+} from "./common.js";
 import { LocalWebSocket } from "./local-websocket.js";
 import { SharedWorkerWebSocket, WorkerWebSocket } from "./worker.js";
-
-export const LOCAL_RELAY_URI = "ws://nostr-idb-local";
-export const WORKER_RELAY_URI = "ws://nostr-idb-worker";
-export const SHARED_WORKER_RELAY_URI = "ws://nostr-idb-shared-worker";
 
 class OverrideWebSocket extends WebSocket {
   constructor(url: string | URL, protocols?: string | string[]) {
