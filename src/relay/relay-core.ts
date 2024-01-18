@@ -10,6 +10,7 @@ import {
 import { sortByDate } from "../utils.js";
 import { nanoid } from "../lib/nanoid.js";
 import { logger } from "../debug.js";
+import { pruneLastUsed } from "../index.js";
 
 export type SubscriptionOptions = {
   id?: string;
@@ -30,20 +31,27 @@ export type RelayCoreOptions = {
   writeInterval?: number;
   /** number of indexes to cache in memory. defaults to 1000 */
   cacheIndexes?: number;
+  /** how often to prune the database */
+  pruneInterval?: number;
+  /** Maximum number of events to store in the database */
+  maxEvents?: number;
 };
 
-const defaultOptions: RelayCoreOptions = {
+const defaultOptions: Required<RelayCoreOptions> = {
   batchWrite: 1000,
   writeInterval: 100,
   cacheIndexes: 1000,
+  pruneInterval: 1000 * 60,
+  maxEvents: 50000,
 };
 
 const log = logger.extend("relay");
 
 /** Main class that implements the relay logic */
 export class RelayCore {
-  private options: RelayCoreOptions;
+  private options: Required<RelayCoreOptions>;
   private writeInterval?: number;
+  private pruneInterval?: number;
   get running() {
     return !!this.writeInterval;
   }
@@ -73,13 +81,21 @@ export class RelayCore {
     this.writeInterval = self.setInterval(() => {
       this.writeQueue.flush(this.options.batchWrite);
     }, this.options.writeInterval);
+
+    this.pruneInterval = self.setInterval(() => {
+      pruneLastUsed(this.db, this.options.maxEvents);
+    }, this.options.pruneInterval);
   }
   public async stop() {
     if (this.writeInterval) {
       self.clearInterval(this.writeInterval);
       this.writeInterval = undefined;
-      log("Stopped");
     }
+    if (this.pruneInterval) {
+      self.clearInterval(this.pruneInterval);
+      this.pruneInterval = undefined;
+    }
+    log("Stopped");
   }
 
   public async publish(event: Event): Promise<string> {

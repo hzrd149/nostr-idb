@@ -43,9 +43,7 @@ export class WriteQueue {
         events.push(event);
       }
       await addEvents(this.db, events);
-      log(
-        `Wrote ${events.length} to database, ${this.eventQueue.length} events left`,
-      );
+      log(`Wrote ${events.length} to database,${this.eventQueue.length} left`);
     }
 
     if (this.lastUsedQueue.size > 0) {

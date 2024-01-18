@@ -8,6 +8,7 @@
   const db = await openDB();
   const indexCache = new IndexCache();
 
+  window.db = db;
   window.prune = (size = 5000) => pruneLastUsed(db, size);
 </script>
 

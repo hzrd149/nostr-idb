@@ -1,3 +1,4 @@
+import { NostrEvent } from "nostr-tools";
 import { logger } from "../debug.js";
 import { countEvents } from "./query-misc.js";
 import { NostrIDB } from "./schema.js";
@@ -12,7 +13,7 @@ const log = logger.extend("prune");
 export async function pruneLastUsed(
   db: NostrIDB,
   maxEvents: number,
-  // skip?: (event: NostrEvent) => boolean,
+  skip?: (event: NostrEvent) => boolean,
 ) {
   const count = await countEvents(db);
   if (count <= maxEvents) return;
@@ -22,21 +23,21 @@ export async function pruneLastUsed(
 
   log(`Pruning database to ${maxEvents}`);
 
-  const used = await db.getAll("used");
+  const used = (await db.getAll("used")).sort((a, b) => a.date - b.date);
+
   const eventsTransaction = db.transaction("events", "readwrite");
   const usedTransaction = db.transaction("used", "readwrite");
-  const sorted = used.sort((a, b) => b.date - a.date);
 
   const promises: Promise<void>[] = [];
   let i = diff;
   while (i > 0) {
-    const entry = sorted.shift();
+    const entry = used.shift();
     if (!entry) break;
     const uid = entry.uid;
-    // if(skip){
-    // 	const row = await db.get('events', uid)
-    // 	if(row && skip(row.event)) continue
-    // }
+    if (skip) {
+      const row = await db.get("events", uid);
+      if (row && skip(row.event)) continue;
+    }
     promises.push(eventsTransaction.store.delete(uid));
     promises.push(usedTransaction.store.delete(uid));
     i--;

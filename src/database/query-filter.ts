@@ -166,7 +166,7 @@ export async function getIdsForFilter(
   let timeFilterIds: string[] | null = null;
 
   // query for time first if since is set
-  if (filter.since) {
+  if (filter.since !== undefined) {
     timeFilterIds = await queryForTime(db, filter.since, filter.until);
     and(timeFilterIds);
   }
@@ -182,7 +182,7 @@ export async function getIdsForFilter(
   if (filter.kinds) and(await queryForKinds(db, filter.kinds, indexCache));
 
   // query for time last if only until is set
-  if (filter.since === undefined && filter.until) {
+  if (filter.since === undefined && filter.until !== undefined) {
     timeFilterIds = await queryForTime(db, filter.since, filter.until);
     and(timeFilterIds);
   }
