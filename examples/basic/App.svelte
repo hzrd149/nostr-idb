@@ -3,12 +3,12 @@
     IndexCache,
     getEventsForFilter,
     openDB,
-    pruneDatabaseToSize,
+    pruneLastUsed,
   } from "../../dist/index.js";
   const db = await openDB();
   const indexCache = new IndexCache();
 
-  window.prune = (size = 5000) => pruneDatabaseToSize(db, size);
+  window.prune = (size = 5000) => pruneLastUsed(db, size);
 </script>
 
 <script lang="js">
