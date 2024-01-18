@@ -58,10 +58,10 @@ await addEvents(db, [...])
 
 // query db
 const events = await getEventsForFilters(db, [
-	{
-		kinds: [1, 6],
-		limit: 30
-	}
+  {
+    kinds: [1, 6],
+    limit: 30
+  }
 ])
 ```
 
@@ -202,10 +202,10 @@ await addEvents(db, [...])
 
 // if indexCache is passed in getEventsForFilters will check it first and save any indexes to it
 const events = await getEventsForFilters(db, [
-	{
-		kinds: [1, 6],
-		limit: 30
-	}
+  {
+    kinds: [1, 6],
+    limit: 30
+  }
 ], indexCache)
 
 // add more events
