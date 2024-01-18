@@ -1,5 +1,16 @@
 # nostr-idb
 
+## 2.0.0
+
+### Major Changes
+
+- d7c74fb: Remove single `addEvent` method
+- e09e98c: Add `WebSocket` class
+- e09e98c: Add `LocalWebSocket` class
+- e09e98c: Add `WorkerWebSocket` class
+- e09e98c: Add `SharedWorkerWebSocket` class
+- e09e98c: Add `NostrIDBWorker` and `NostrIDBSharedWorker` classes
+
 ## 1.1.1
 
 ### Patch Changes
