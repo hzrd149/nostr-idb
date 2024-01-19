@@ -42,7 +42,7 @@ const defaultOptions: Required<RelayCoreOptions> = {
   writeInterval: 100,
   cacheIndexes: 1000,
   pruneInterval: 1000 * 60,
-  maxEvents: 50000,
+  maxEvents: 10000,
 };
 
 const log = logger.extend("relay");
