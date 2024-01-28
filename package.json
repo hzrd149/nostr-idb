@@ -42,7 +42,7 @@
     "prebuild": "rm -rf dist",
     "build": "tsc && rollup -c",
     "build:examples": "vite build && cp examples/index.html public/index.html",
-    "prepare": "tsc",
+    "prepare": "tsc && rollup -c",
     "format": "prettier -w ."
   },
   "dependencies": {
