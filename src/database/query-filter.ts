@@ -208,15 +208,12 @@ export async function getIdsForFilters(
 ) {
   if (filters.length === 0) throw new Error("No Filters");
 
-  let ids: Set<string> | null = null;
+  let ids = new Set<string>();
 
   for (const filter of filters) {
     const filterIds = await getIdsForFilter(db, filter, indexCache);
-    if (!ids) ids = filterIds;
-    else for (const id of ids) if (!filterIds.has(id)) ids.delete(id);
+    for (const id of filterIds) ids.add(id);
   }
-
-  if (ids === null) throw new Error("Empty filters");
 
   return ids;
 }
