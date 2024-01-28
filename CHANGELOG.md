@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 2.0.1
+
+### Patch Changes
+
+- e4ec1d1: Fix multiple filters being interpreted as and
+
 ## 2.0.0
 
 ### Major Changes
