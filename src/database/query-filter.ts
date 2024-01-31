@@ -1,4 +1,4 @@
-import type { Event, Filter } from "nostr-tools";
+import type { Event, Filter, NostrEvent } from "nostr-tools";
 import type { NostrIDB } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
 import { sortByDate } from "../utils.js";
@@ -222,13 +222,25 @@ async function loadEventsByUID(
   db: NostrIDB,
   uids: string[],
   filters: Filter[],
+  eventMap?: Map<string, NostrEvent>,
 ) {
   const eventBuffer: Event[] = [];
+
+  // load from in-memory event map
+  let remainingIds: string[] = [];
+  if (eventMap) {
+    for (const uid of uids) {
+      const event = eventMap.get(uid);
+      if (event) eventBuffer.push(event);
+      else remainingIds.push(uid);
+    }
+  } else remainingIds = uids;
+
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
 
   const handleEntry = (e?: { event: Event }) => e && eventBuffer.push(e.event);
-  const promises = Array.from(uids).map((uid) =>
+  const promises = Array.from(remainingIds).map((uid) =>
     objectStore.get(uid).then(handleEntry),
   );
   trans.commit();
@@ -250,18 +262,20 @@ export async function getEventsForFilter(
   db: NostrIDB,
   filter: Filter,
   indexCache?: IndexCache,
+  eventMap?: Map<string, NostrEvent>,
 ) {
   const ids = await getIdsForFilter(db, filter, indexCache);
-  return await loadEventsByUID(db, Array.from(ids), [filter]);
+  return await loadEventsByUID(db, Array.from(ids), [filter], eventMap);
 }
 
 export async function getEventsForFilters(
   db: NostrIDB,
   filters: Filter[],
   indexCache?: IndexCache,
+  eventMap?: Map<string, NostrEvent>,
 ) {
   const ids = await getIdsForFilters(db, filters, indexCache);
-  return await loadEventsByUID(db, Array.from(ids), filters);
+  return await loadEventsByUID(db, Array.from(ids), filters, eventMap);
 }
 
 export async function countEventsForFilter(

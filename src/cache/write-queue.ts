@@ -3,10 +3,11 @@ import { addEvents, getEventUID, updateUsed } from "../database/ingest.js";
 import { NostrIDB } from "../database/schema.js";
 import { logger } from "../debug.js";
 
-const log = logger.extend("cache:write");
+const log = logger.extend("writeQueue");
 
 export class WriteQueue {
   db: NostrIDB;
+  private queuedIds = new Set<string>();
   private eventQueue: NostrEvent[] = [];
   private lastUsedQueue = new Set<string>();
 
@@ -15,12 +16,16 @@ export class WriteQueue {
   }
 
   addEvent(event: NostrEvent) {
+    if (this.queuedIds.has(event.id)) return;
     this.eventQueue.push(event);
+    this.queuedIds.add(event.id);
     this.useEvent(event);
   }
   addEvents(events: NostrEvent[]) {
-    this.eventQueue.push(...events);
-    this.useEvents(events);
+    const arr = events.filter((e) => !this.queuedIds.has(e.id));
+    if (arr.length === 0) return;
+    this.eventQueue.push(...arr);
+    this.useEvents(arr);
   }
 
   useEvent(event: NostrEvent) {
@@ -41,9 +46,12 @@ export class WriteQueue {
         const event = this.eventQueue.shift();
         if (!event) break;
         events.push(event);
+        this.queuedIds.delete(event.id);
       }
       await addEvents(this.db, events);
-      log(`Wrote ${events.length} to database,${this.eventQueue.length} left`);
+      log(
+        `Wrote ${events.length} to database ${this.eventQueue.length} events left`,
+      );
     }
 
     if (this.lastUsedQueue.size > 0) {

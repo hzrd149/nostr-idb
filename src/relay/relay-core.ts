@@ -1,4 +1,4 @@
-import { Event, Filter, kinds, matchFilters } from "nostr-tools";
+import { Event, Filter, NostrEvent, kinds, matchFilters } from "nostr-tools";
 
 import { WriteQueue } from "../cache/write-queue.js";
 import { IndexCache } from "../cache/index-cache.js";
@@ -10,7 +10,7 @@ import {
 import { sortByDate } from "../utils.js";
 import { nanoid } from "../lib/nanoid.js";
 import { logger } from "../debug.js";
-import { pruneLastUsed } from "../index.js";
+import { getEventUID, pruneLastUsed } from "../index.js";
 
 export type SubscriptionOptions = {
   id?: string;
@@ -56,6 +56,7 @@ export class RelayCore {
     return !!this.writeInterval;
   }
 
+  private eventMap = new Map<string, NostrEvent>();
   private writeQueue: WriteQueue;
   private indexCache: IndexCache;
   db: NostrIDB;
@@ -102,6 +103,7 @@ export class RelayCore {
     if (!kinds.isEphemeralKind(event.kind)) {
       this.writeQueue.addEvent(event);
       this.indexCache.addEventToIndexes(event);
+      this.eventMap.set(getEventUID(event), event);
     }
 
     let subs = 0;
@@ -119,6 +121,10 @@ export class RelayCore {
     return await countEventsForFilters(this.db, filters);
   }
 
+  private addToEventMaps(events: Iterable<NostrEvent>) {
+    for (const event of events) this.eventMap.set(getEventUID(event), event);
+  }
+
   private async executeSubscription(sub: Subscription) {
     const start = new Date().valueOf();
     log(`Running ${sub.id}`, sub.filters);
@@ -127,32 +133,36 @@ export class RelayCore {
     const eventsFromQueue = this.writeQueue.matchPending(sub.filters);
 
     // get events
-    await getEventsForFilters(this.db, sub.filters, this.indexCache).then(
-      (filterEvents) => {
-        if (sub.onevent) {
-          const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+    await getEventsForFilters(
+      this.db,
+      sub.filters,
+      this.indexCache,
+      this.eventMap,
+    ).then((filterEvents) => {
+      this.addToEventMaps(filterEvents);
+      if (sub.onevent) {
+        const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
 
-          const events =
-            eventsFromQueue.length > 0
-              ? [
-                  ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
-                  ...eventsFromQueue,
-                ].sort(sortByDate)
-              : filterEvents;
+        const events =
+          eventsFromQueue.length > 0
+            ? [
+                ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+                ...eventsFromQueue,
+              ].sort(sortByDate)
+            : filterEvents;
 
-          for (const event of events) {
-            sub.onevent(event);
-            this.writeQueue.useEvent(event);
-          }
-
-          const delta = new Date().valueOf() - start;
-          log(
-            `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
-          );
+        for (const event of events) {
+          sub.onevent(event);
+          this.writeQueue.useEvent(event);
         }
-        if (sub.oneose) sub.oneose();
-      },
-    );
+
+        const delta = new Date().valueOf() - start;
+        log(
+          `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
+        );
+      }
+      if (sub.oneose) sub.oneose();
+    });
   }
 
   subscribe(
