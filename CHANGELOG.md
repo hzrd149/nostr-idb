@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 2.1.0
+
+### Minor Changes
+
+- 55e853c: Add in memory eventMap to relay core
+
 ## 2.0.1
 
 ### Patch Changes
