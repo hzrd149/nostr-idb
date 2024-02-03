@@ -103,14 +103,18 @@ export class RelayCore {
     if (!kinds.isEphemeralKind(event.kind)) {
       this.writeQueue.addEvent(event);
       this.indexCache.addEventToIndexes(event);
-      this.eventMap.set(getEventUID(event), event);
     }
 
+    const uid = getEventUID(event);
     let subs = 0;
-    for (const [id, sub] of this.subscriptions) {
-      if (sub.onevent && matchFilters(sub.filters, event)) {
-        sub.onevent(event);
-        subs++;
+    if (!this.eventMap.has(uid)) {
+      if (!kinds.isEphemeralKind(event.kind)) this.eventMap.set(uid, event);
+
+      for (const [id, sub] of this.subscriptions) {
+        if (sub.onevent && matchFilters(sub.filters, event)) {
+          sub.onevent(event);
+          subs++;
+        }
       }
     }
 
