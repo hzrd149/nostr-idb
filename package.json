@@ -1,6 +1,6 @@
 {
   "name": "nostr-idb",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "A collection of helper methods for storing nostr events in IndexedDB",
   "author": "hzrd149",
   "license": "MIT",

@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 2.1.1
+
+### Patch Changes
+
+- 890f64a: don't rebroadcast duplicate events
+
 ## 2.1.0
 
 ### Minor Changes
