@@ -10,7 +10,8 @@ import {
 import { sortByDate } from "../utils.js";
 import { nanoid } from "../lib/nanoid.js";
 import { logger } from "../debug.js";
-import { getEventUID, pruneLastUsed } from "../index.js";
+import { getEventUID } from "../database/ingest.js";
+import { pruneLastUsed } from "../database/prune.js";
 
 export type SubscriptionOptions = {
   id?: string;
@@ -196,7 +197,11 @@ export class RelayCore {
   }
 
   unsubscribe(id: string) {
-    log(`Closing ${id}`);
-    this.subscriptions.delete(id);
+    const sub = this.subscriptions.get(id);
+    if (sub) {
+      log(`Closing ${id}`);
+      sub.onclose?.("unsubscribe");
+      this.subscriptions.delete(id);
+    }
   }
 }
