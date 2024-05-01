@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 2.1.4
+
+### Patch Changes
+
+- Add missing fire method to subscription type
+
 ## 2.1.1
 
 ### Patch Changes

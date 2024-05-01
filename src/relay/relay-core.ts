@@ -23,6 +23,7 @@ export type Subscription = SubscriptionOptions & {
   id: string;
   filters: Filter[];
   close(message?: string): void;
+  fire(): void;
 };
 
 export type RelayCoreOptions = {
@@ -62,12 +63,7 @@ export class RelayCore {
   private indexCache: IndexCache;
   db: NostrIDB;
 
-  private subscriptions: Map<
-    string,
-    SubscriptionOptions & {
-      filters: Filter[];
-    }
-  > = new Map();
+  private subscriptions: Map<string, Subscription> = new Map();
 
   constructor(db: NostrIDB, opts: RelayCoreOptions = {}) {
     this.db = db;
