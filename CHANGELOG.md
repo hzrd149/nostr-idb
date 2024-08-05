@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 2.1.5
+
+### Patch Changes
+
+- Add timeout for subscriptions
+
 ## 2.1.4
 
 ### Patch Changes

@@ -4,7 +4,8 @@
 </script>
 
 <script lang="js">
-  import { AbstractRelay, Relay, verifiedSymbol } from "nostr-tools";
+  import { Relay, verifiedSymbol } from "nostr-tools";
+  import { AbstractRelay } from "nostr-tools/abstract-relay";
   import {
     LOCAL_RELAY_URI,
     SHARED_WORKER_RELAY_URI,

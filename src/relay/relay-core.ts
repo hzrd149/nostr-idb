@@ -63,6 +63,7 @@ export class RelayCore {
   private indexCache: IndexCache;
   db: NostrIDB;
 
+  public baseEoseTimeout: number = 4400;
   private subscriptions: Map<string, Subscription> = new Map();
 
   constructor(db: NostrIDB, opts: RelayCoreOptions = {}) {
@@ -133,36 +134,47 @@ export class RelayCore {
     // load any events from the write queue
     const eventsFromQueue = this.writeQueue.matchPending(sub.filters);
 
-    // get events
-    await getEventsForFilters(
-      this.db,
-      sub.filters,
-      this.indexCache,
-      this.eventMap,
-    ).then((filterEvents) => {
-      this.addToEventMaps(filterEvents);
-      if (sub.onevent) {
-        const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+    return new Promise<void>((res, rej) => {
+      const timeout = setTimeout(() => {
+        if (sub.oneose) sub.oneose();
+        res();
+      }, this.baseEoseTimeout);
 
-        const events =
-          eventsFromQueue.length > 0
-            ? [
-                ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
-                ...eventsFromQueue,
-              ].sort(sortByDate)
-            : filterEvents;
+      // get events
+      getEventsForFilters(
+        this.db,
+        sub.filters,
+        this.indexCache,
+        this.eventMap,
+      ).then((filterEvents) => {
+        clearTimeout(timeout);
+        this.addToEventMaps(filterEvents);
 
-        for (const event of events) {
-          sub.onevent(event);
-          this.writeQueue.useEvent(event);
+        if (sub.onevent) {
+          const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+
+          const events =
+            eventsFromQueue.length > 0
+              ? [
+                  ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+                  ...eventsFromQueue,
+                ].sort(sortByDate)
+              : filterEvents;
+
+          for (const event of events) {
+            sub.onevent(event);
+            this.writeQueue.useEvent(event);
+          }
+
+          const delta = new Date().valueOf() - start;
+          log(
+            `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
+          );
         }
 
-        const delta = new Date().valueOf() - start;
-        log(
-          `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
-        );
-      }
-      if (sub.oneose) sub.oneose();
+        if (sub.oneose) sub.oneose();
+        res();
+      });
     });
   }
 
