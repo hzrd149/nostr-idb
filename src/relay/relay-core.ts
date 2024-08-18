@@ -162,8 +162,12 @@ export class RelayCore {
               : filterEvents;
 
           for (const event of events) {
-            sub.onevent(event);
-            this.writeQueue.useEvent(event);
+            try {
+              sub.onevent(event);
+              this.writeQueue.useEvent(event);
+            } catch (error) {
+              log(`onevent failed with error`, error);
+            }
           }
 
           const delta = new Date().valueOf() - start;
