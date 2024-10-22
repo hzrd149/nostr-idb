@@ -11,6 +11,11 @@ export class WriteQueue {
   private eventQueue: NostrEvent[] = [];
   private lastUsedQueue = new Set<string>();
 
+  /** Called for each chunk of events before they are written to the database */
+  processEvents:
+    | ((events: NostrEvent[]) => Promise<NostrEvent[] | void>)
+    | null = null;
+
   constructor(db: NostrIDB) {
     this.db = db;
   }
@@ -41,13 +46,18 @@ export class WriteQueue {
 
   async flush(count = 1000) {
     if (this.eventQueue.length > 0) {
-      const events: NostrEvent[] = [];
+      let events: NostrEvent[] = [];
       for (let i = 0; i < count; i++) {
         const event = this.eventQueue.shift();
         if (!event) break;
         events.push(event);
         this.queuedIds.delete(event.id);
       }
+
+      if (this.processEvents) {
+        events = (await this.processEvents(events)) || events;
+      }
+
       await addEvents(this.db, events);
       log(`Wrote ${events.length} to database`);
       if (this.eventQueue.length > 0) log(`${this.eventQueue.length} left`);

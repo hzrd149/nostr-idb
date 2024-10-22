@@ -51,16 +51,14 @@ const log = logger.extend("relay");
 
 /** Main class that implements the relay logic */
 export class RelayCore {
-  private options: Required<RelayCoreOptions>;
-  private writeInterval?: number;
+  options: Required<RelayCoreOptions>;
+  running = false;
+  private writeTimeout?: number;
   private pruneInterval?: number;
-  get running() {
-    return !!this.writeInterval;
-  }
 
-  private eventMap = new Map<string, NostrEvent>();
-  private writeQueue: WriteQueue;
-  private indexCache: IndexCache;
+  eventMap = new Map<string, NostrEvent>();
+  writeQueue: WriteQueue;
+  indexCache: IndexCache;
   db: NostrIDB;
 
   public baseEoseTimeout: number = 4400;
@@ -75,20 +73,31 @@ export class RelayCore {
     this.indexCache.max = this.options.cacheIndexes;
   }
 
-  public async start(): Promise<void> {
-    log("Starting");
-    this.writeInterval = self.setInterval(() => {
-      this.writeQueue.flush(this.options.batchWrite);
-    }, this.options.writeInterval);
+  private async flush() {
+    await this.writeQueue.flush();
 
+    // start next
+    this.writeTimeout = self.setTimeout(
+      this.flush.bind(this),
+      this.options.writeInterval,
+    );
+  }
+
+  public async start(): Promise<void> {
+    if (this.running) return;
+
+    log("Starting");
+    this.running = true;
+    await this.flush();
     this.pruneInterval = self.setInterval(() => {
       pruneLastUsed(this.db, this.options.maxEvents);
     }, this.options.pruneInterval);
   }
   public async stop() {
-    if (this.writeInterval) {
-      self.clearInterval(this.writeInterval);
-      this.writeInterval = undefined;
+    if (!this.running) return;
+    if (this.writeTimeout) {
+      self.clearTimeout(this.writeTimeout);
+      this.writeTimeout = undefined;
     }
     if (this.pruneInterval) {
       self.clearInterval(this.pruneInterval);

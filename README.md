@@ -149,6 +149,11 @@ const db = await openDB("events");
 
 const cacheRelay = new CacheRelay(db);
 
+// optionally filter out events before they are written to the database
+cacheRelay.core.writeQueue.processEvents = async (events) => {
+  return events.filter((event) => event.content.includes("gm"));
+};
+
 for (let event of events) {
   cacheRelay.publish(event);
 }
