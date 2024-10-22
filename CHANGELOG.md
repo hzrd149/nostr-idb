@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 2.2.0
+
+### Minor Changes
+
+- 9be773e: Add `processEvents` method to `WriteQueue`
+
 ## 2.1.6
 
 ### Patch Changes
