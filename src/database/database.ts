@@ -12,7 +12,7 @@ export const NOSTR_IDB_VERSION = 2;
 export async function openDB(
   name = NOSTR_IDB_NAME,
   callbacks?: OpenDBCallbacks<Schema>,
-) {
+): Promise<NostrIDB> {
   return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
     ...callbacks,
     upgrade(db, oldVersion, newVersion, transaction, event) {
