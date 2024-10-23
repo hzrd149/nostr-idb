@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 2.2.1
+
+### Patch Changes
+
+- 98377e6: Export `NostrIDB` type
+
 ## 2.2.0
 
 ### Minor Changes
