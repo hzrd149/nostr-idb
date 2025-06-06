@@ -1,12 +1,10 @@
-import { IDBPTransaction } from "idb";
-import { type Event, kinds, validateEvent } from "nostr-tools";
+import { type Event, validateEvent } from "nostr-tools";
 
-import type { NostrIDB, Schema } from "./schema.js";
+import type { NostrIDB } from "./schema.js";
 import { GENERIC_TAGS } from "./common.js";
-import {
-  isParameterizedReplaceableKind,
-  isReplaceableKind,
-} from "nostr-tools/kinds";
+import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
+
+export const EventUIDSymbol = Symbol.for("event-uid");
 
 /** Returns an events tags as an array of string for indexing */
 export function getEventTags(event: Event) {
@@ -19,16 +17,14 @@ export function getEventTags(event: Event) {
 
 /** returns the events Unique ID */
 export function getEventUID(event: Event) {
-  if (
-    kinds.isReplaceableKind(event.kind) ||
-    kinds.isParameterizedReplaceableKind(event.kind)
-  ) {
+  if (event[EventUIDSymbol]) return event[EventUIDSymbol];
+
+  if (isReplaceableKind(event.kind) || isAddressableKind(event.kind)) {
     const d = event.tags.find((t) => t[0] === "d")?.[1];
-    return d
+    return (event[EventUIDSymbol] = d
       ? `${event.kind}:${event.pubkey}:${d}`
-      : `${event.kind}:${event.pubkey}`;
-  }
-  return event.id;
+      : `${event.kind}:${event.pubkey}`);
+  } else return (event[EventUIDSymbol] = event.id);
 }
 
 export async function addEvents(db: NostrIDB, events: Event[]) {
@@ -36,7 +32,7 @@ export async function addEvents(db: NostrIDB, events: Event[]) {
   events = events.filter((event) => validateEvent(event));
 
   const replaceableEvents = events.filter(
-    (e) => isReplaceableKind(e.kind) || isParameterizedReplaceableKind(e.kind),
+    (e) => isReplaceableKind(e.kind) || isAddressableKind(e.kind),
   );
   const existingEvents: Record<string, number> = {};
   if (replaceableEvents.length > 0) {
