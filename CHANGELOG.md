@@ -1,5 +1,16 @@
 # nostr-idb
 
+## 2.3.0
+
+### Minor Changes
+
+- e21466a: Bump `nostr-tools` to `2.14` and lock minor version
+
+### Patch Changes
+
+- 98377e6: Export `NostrIDB` type
+- e21466a: Cache event UID on event
+
 ## 2.2.0
 
 ### Minor Changes
