@@ -1,8 +1,8 @@
-import { type Event, validateEvent } from "nostr-tools";
+import { type Event } from "nostr-tools";
 
-import type { NostrIDB } from "./schema.js";
-import { GENERIC_TAGS } from "./common.js";
 import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
+import { GENERIC_TAGS } from "./common.js";
+import type { NostrIDB } from "./schema.js";
 
 export const EventUIDSymbol = Symbol.for("event-uid");
 
@@ -15,22 +15,19 @@ export function getEventTags(event: Event) {
     .map((t) => t[0] + t[1]);
 }
 
-/** returns the events Unique ID */
+/** Returns the events Unique ID */
 export function getEventUID(event: Event) {
   if (event[EventUIDSymbol]) return event[EventUIDSymbol];
 
   if (isReplaceableKind(event.kind) || isAddressableKind(event.kind)) {
     const d = event.tags.find((t) => t[0] === "d")?.[1];
-    return (event[EventUIDSymbol] = d
-      ? `${event.kind}:${event.pubkey}:${d}`
-      : `${event.kind}:${event.pubkey}`);
+    return (event[EventUIDSymbol] =
+      "" + event.kind + ":" + event.pubkey + ":" + (d ?? ""));
   } else return (event[EventUIDSymbol] = event.id);
 }
 
+/** Inserts an array of events into the database */
 export async function addEvents(db: NostrIDB, events: Event[]) {
-  // filter out invalid events
-  events = events.filter((event) => validateEvent(event));
-
   const replaceableEvents = events.filter(
     (e) => isReplaceableKind(e.kind) || isAddressableKind(e.kind),
   );
@@ -66,6 +63,7 @@ export async function addEvents(db: NostrIDB, events: Event[]) {
   await writeTransaction.commit();
 }
 
+/** Sets the last used date on a list of events */
 export async function updateUsed(db: NostrIDB, uids: Iterable<string>) {
   const trans = db.transaction("used", "readwrite");
   const nowUnix = Math.floor(new Date().valueOf() / 1000);

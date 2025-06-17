@@ -4,11 +4,12 @@ import { GENERIC_TAGS } from "./common.js";
 import { sortByDate } from "../utils.js";
 import { IndexCache } from "../cache/index-cache.js";
 
-export function queryForPubkeys(
+/** Query for events by pubkey */
+export async function queryForPubkeys(
   db: NostrIDB,
   authors: Filter["authors"] = [],
   indexCache?: IndexCache,
-) {
+): Promise<Set<string>> {
   const loaded: string[] = [];
   const ids = new Set<string>();
 
@@ -46,12 +47,13 @@ export function queryForPubkeys(
   return Promise.all(promises).then(() => ids);
 }
 
-export function queryForTag(
+/** Query for events by indexable tag */
+export async function queryForTag(
   db: NostrIDB,
   tag: string,
   values: string[],
   indexCache?: IndexCache,
-) {
+): Promise<Set<string>> {
   const loaded: string[] = [];
   const ids = new Set<string>();
 
@@ -87,11 +89,12 @@ export function queryForTag(
   return Promise.all(promises).then(() => ids);
 }
 
-export function queryForKinds(
+/** Query for events by kind */
+export async function queryForKinds(
   db: NostrIDB,
   kinds: Filter["kinds"] = [],
   indexCache?: IndexCache,
-) {
+): Promise<Set<string>> {
   const loaded: number[] = [];
   const ids = new Set<string>();
 
@@ -127,11 +130,12 @@ export function queryForKinds(
   return Promise.all(promises).then(() => ids);
 }
 
+/** Query for events by time */
 export async function queryForTime(
   db: NostrIDB,
   since: number | undefined,
   until: number | undefined,
-) {
+): Promise<string[]> {
   let range: IDBKeyRange;
   if (since !== undefined && until !== undefined)
     range = IDBKeyRange.bound(since, until);
@@ -145,6 +149,7 @@ export async function queryForTime(
   return ids;
 }
 
+/** Get ids for a filter */
 export async function getIdsForFilter(
   db: NostrIDB,
   filter: Filter,
@@ -201,11 +206,12 @@ export async function getIdsForFilter(
   return ids;
 }
 
+/** Get ids for a list of filters */
 export async function getIdsForFilters(
   db: NostrIDB,
   filters: Filter[],
   indexCache?: IndexCache,
-) {
+): Promise<Set<string>> {
   if (filters.length === 0) throw new Error("No Filters");
 
   let ids = new Set<string>();
@@ -218,6 +224,7 @@ export async function getIdsForFilters(
   return ids;
 }
 
+/** Load events by uid */
 async function loadEventsByUID(
   db: NostrIDB,
   uids: string[],
@@ -258,40 +265,44 @@ async function loadEventsByUID(
   return sorted;
 }
 
+/** Get events for a filter */
 export async function getEventsForFilter(
   db: NostrIDB,
   filter: Filter,
   indexCache?: IndexCache,
   eventMap?: Map<string, NostrEvent>,
-) {
+): Promise<Event[]> {
   const ids = await getIdsForFilter(db, filter, indexCache);
   return await loadEventsByUID(db, Array.from(ids), [filter], eventMap);
 }
 
+/** Get events for an array of filters */
 export async function getEventsForFilters(
   db: NostrIDB,
   filters: Filter[],
   indexCache?: IndexCache,
   eventMap?: Map<string, NostrEvent>,
-) {
+): Promise<Event[]> {
   const ids = await getIdsForFilters(db, filters, indexCache);
   return await loadEventsByUID(db, Array.from(ids), filters, eventMap);
 }
 
+/** Count events for a filter */
 export async function countEventsForFilter(
   db: NostrIDB,
   filter: Filter,
   indexCache?: IndexCache,
-) {
+): Promise<number> {
   const ids = await getIdsForFilter(db, filter, indexCache);
   return ids.size;
 }
 
+/** Count events for an array of filters */
 export async function countEventsForFilters(
   db: NostrIDB,
   filters: Filter[],
   indexCache?: IndexCache,
-) {
+): Promise<number> {
   const ids = await getIdsForFilters(db, filters, indexCache);
   return ids.size;
 }

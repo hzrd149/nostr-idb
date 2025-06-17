@@ -6,7 +6,7 @@ import { NostrIDB } from "./schema.js";
 const log = logger.extend("prune");
 
 /**
- * Prunes the database down based on when the event was last used
+ * Remove a number of events from the database based on when they were last used
  * @param db the database
  * @param maxEvents the max number of events to leave in the db
  */

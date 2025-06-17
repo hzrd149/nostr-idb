@@ -1,6 +1,7 @@
 import type { Event } from "nostr-tools";
 import { NostrIDB } from "./schema.js";
 
+/** Get events for address pointers */
 export async function getEventsFromAddressPointers(
   db: NostrIDB,
   pointers: { kind: number; pubkey: string; identifier?: string }[],
@@ -28,6 +29,7 @@ export async function getEventsFromAddressPointers(
   return sorted;
 }
 
+/** Count events by pubkey */
 export async function countEventsByPubkeys(db: NostrIDB) {
   let cursor = await db
     .transaction("events", "readonly")
@@ -46,6 +48,7 @@ export async function countEventsByPubkeys(db: NostrIDB) {
   return counts;
 }
 
+/** Count events by kind */
 export async function countEventsByKind(db: NostrIDB) {
   let cursor = await db
     .transaction("events", "readonly")
@@ -64,6 +67,7 @@ export async function countEventsByKind(db: NostrIDB) {
   return counts;
 }
 
+/** Count all events in the database */
 export function countEvents(db: NostrIDB) {
   return db.transaction("events", "readonly").store.count();
 }

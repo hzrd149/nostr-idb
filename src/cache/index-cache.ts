@@ -19,6 +19,7 @@ class Index<T> extends Set<string> {
   }
 }
 
+/** In-memory cache for indexes of events */
 export class IndexCache {
   kinds: Map<number, Index<number>> = new Map();
   pubkeys: Map<string, Index<string>> = new Map();
