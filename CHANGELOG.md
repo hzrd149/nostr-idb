@@ -1,5 +1,12 @@
 # nostr-idb
 
+## 2.4.0
+
+### Minor Changes
+
+- d4cdfc9: Remove event validation when inserting events
+- d4cdfc9: Update replaceable events UID to follow NIP-01 addresses
+
 ## 2.3.0
 
 ### Minor Changes
