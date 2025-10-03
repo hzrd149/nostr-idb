@@ -1,5 +1,20 @@
 # nostr-idb
 
+## 3.0.0
+
+### Major Changes
+
+- 6f4d8ae: Rename `getEventsFromAddressPointers` to `getReplaceableEvents`
+- 6f4d8ae: Rename `NostrIDB` type to `NostrIDBDatabase`
+- 6f4d8ae: Bump `nostr-tools` to `2.17`
+- 6f4d8ae: Remove the websocket interfaces
+- 6f4d8ae: Rename `GENERIC_TAGS` to `INDEXABLE_TAGS`
+- 6f4d8ae: Replace `RelayCore` with simpler `NostrIDB` class
+
+### Minor Changes
+
+- 6f4d8ae: Add stricter types
+
 ## 2.4.0
 
 ### Minor Changes
