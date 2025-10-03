@@ -10,7 +10,7 @@ export const INDEXABLE_TAGS = (LETTERS + LETTERS.toUpperCase()).split("");
 export const EventUIDSymbol = Symbol.for("event-uid");
 
 /** Returns an events tags as an array of string for indexing */
-export function getEventTags(event: NostrEvent) {
+export function getEventTags(event: NostrEvent): string[] {
   return event.tags
     .filter(
       (t) =>
@@ -20,16 +20,18 @@ export function getEventTags(event: NostrEvent) {
 }
 
 /** Returns the events Unique ID */
-export function getEventUID(event: NostrEvent) {
+export function getEventUID(event: NostrEvent): string {
   if (Reflect.has(event, EventUIDSymbol))
     return Reflect.get(event, EventUIDSymbol);
 
+  let uid: string;
   if (isReplaceableKind(event.kind) || isAddressableKind(event.kind)) {
     const d = event.tags.find((t) => t[0] === "d")?.[1];
-    return Reflect.set(
-      event,
-      EventUIDSymbol,
-      "" + event.kind + ":" + event.pubkey + ":" + (d ?? ""),
-    );
-  } else return Reflect.set(event, EventUIDSymbol, event.id);
+    uid = "" + event.kind + ":" + event.pubkey + ":" + (d ?? "");
+  } else {
+    uid = event.id;
+  }
+
+  Reflect.set(event, EventUIDSymbol, uid);
+  return uid;
 }
