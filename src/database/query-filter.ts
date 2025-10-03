@@ -198,7 +198,7 @@ export async function getIdsForFilter(
     const limitIds = new Set<string>();
     for (const id of timeFilterIds) {
       if (limitIds.size >= filter.limit) break;
-      if (ids.has(id)) limitIds.add(id);
+      if (ids!.has(id)) limitIds.add(id);
     }
     return limitIds;
   }

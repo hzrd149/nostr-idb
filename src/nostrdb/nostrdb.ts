@@ -71,13 +71,13 @@ export class NostrIDB implements INostrIDB {
   eventMap = new Map<string, NostrEvent>();
 
   /** Queue of events to be written to the database */
-  writeQueue: WriteQueue;
+  writeQueue: WriteQueue | null = null;
 
   /** Cache of indexes */
   indexCache: IndexCache;
 
   /** Database instance */
-  db: NostrIDBDatabase | null;
+  db: NostrIDBDatabase | null = null;
 
   /** Base EOSE timeout */
   public baseEoseTimeout: number = 4400;
@@ -86,10 +86,12 @@ export class NostrIDB implements INostrIDB {
   subscriptions: Map<string, InternalSubscription> = new Map();
 
   constructor(db?: NostrIDBDatabase, opts: NostrDBOptions = {}) {
-    this.db = db ?? null;
     this.options = { ...defaultOptions, ...opts };
 
-    this.writeQueue = new WriteQueue(db);
+    if (db) {
+      this.db = db;
+      this.writeQueue = new WriteQueue(db);
+    }
     this.indexCache = new IndexCache();
     this.indexCache.max = this.options.cacheIndexes;
 
@@ -101,10 +103,17 @@ export class NostrIDB implements INostrIDB {
     this.db = await openDB();
     return this.db;
   }
+  private async getWriteQueue() {
+    if (this.writeQueue) return this.writeQueue;
+    const db = await this.getDb();
+    this.writeQueue = new WriteQueue(db);
+    return this.writeQueue;
+  }
 
   /** Write events to the database */
   private async flush() {
-    await this.writeQueue.flush();
+    const queue = await this.getWriteQueue();
+    await queue.flush();
 
     // start next flush cycle
     this.writeInterval = self.setTimeout(
@@ -145,7 +154,8 @@ export class NostrIDB implements INostrIDB {
   async add(event: NostrEvent): Promise<boolean> {
     // if the event is not ephemeral, add it to the write queue and index cache
     if (!isEphemeralKind(event.kind)) {
-      this.writeQueue.addEvent(event);
+      const queue = await this.getWriteQueue();
+      queue.addEvent(event);
       this.indexCache.addEventToIndexes(event);
     }
 
@@ -314,7 +324,8 @@ export class NostrIDB implements INostrIDB {
     log(`Running ${sub.id}`, sub.filters);
 
     // load any events from the write queue
-    const eventsFromQueue = this.writeQueue.matchPending(sub.filters);
+    const queue = await this.getWriteQueue();
+    const eventsFromQueue = queue.matchPending(sub.filters);
 
     return new Promise<void>(async (res) => {
       const db = await this.getDb();
@@ -343,7 +354,7 @@ export class NostrIDB implements INostrIDB {
             for (const event of events) {
               try {
                 sub.event(event);
-                this.writeQueue.touch(event);
+                queue.touch(event);
               } catch (error) {
                 log(`event handler failed with error`, error);
               }

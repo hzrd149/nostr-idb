@@ -21,11 +21,15 @@ export function getEventTags(event: NostrEvent) {
 
 /** Returns the events Unique ID */
 export function getEventUID(event: NostrEvent) {
-  if (event[EventUIDSymbol]) return event[EventUIDSymbol];
+  if (Reflect.has(event, EventUIDSymbol))
+    return Reflect.get(event, EventUIDSymbol);
 
   if (isReplaceableKind(event.kind) || isAddressableKind(event.kind)) {
     const d = event.tags.find((t) => t[0] === "d")?.[1];
-    return (event[EventUIDSymbol] =
-      "" + event.kind + ":" + event.pubkey + ":" + (d ?? ""));
-  } else return (event[EventUIDSymbol] = event.id);
+    return Reflect.set(
+      event,
+      EventUIDSymbol,
+      "" + event.kind + ":" + event.pubkey + ":" + (d ?? ""),
+    );
+  } else return Reflect.set(event, EventUIDSymbol, event.id);
 }

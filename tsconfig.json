@@ -3,6 +3,7 @@
     "outDir": "dist",
     "target": "ES2022",
     "module": "NodeNext",
+    "strict": true,
     "skipLibCheck": true,
     "moduleResolution": "NodeNext",
     "isolatedModules": true,
