@@ -26,6 +26,7 @@ import {
   type StreamHandlers,
   type Subscription,
 } from "./interface.js";
+import { openDB } from "../database/database.js";
 
 /** Type for internal subscriptions */
 export type InternalSubscription = StreamHandlers &
@@ -57,9 +58,9 @@ const defaultOptions: Required<NostrDBOptions> = {
   maxEvents: 10000,
 };
 
-const log = logger.extend("relay");
+const log = logger.extend("nostridb");
 
-/** Main class that implements the relay logic */
+/** Main class that implements the nostrdb logic */
 export class NostrIDB implements INostrIDB {
   options: Required<NostrDBOptions>;
   running = false;
@@ -76,7 +77,7 @@ export class NostrIDB implements INostrIDB {
   indexCache: IndexCache;
 
   /** Database instance */
-  db: NostrIDBDatabase;
+  db: NostrIDBDatabase | null;
 
   /** Base EOSE timeout */
   public baseEoseTimeout: number = 4400;
@@ -84,8 +85,8 @@ export class NostrIDB implements INostrIDB {
   /** Map of active subscriptions */
   subscriptions: Map<string, InternalSubscription> = new Map();
 
-  constructor(db: NostrIDBDatabase, opts: NostrDBOptions = {}) {
-    this.db = db;
+  constructor(db?: NostrIDBDatabase, opts: NostrDBOptions = {}) {
+    this.db = db ?? null;
     this.options = { ...defaultOptions, ...opts };
 
     this.writeQueue = new WriteQueue(db);
@@ -93,6 +94,12 @@ export class NostrIDB implements INostrIDB {
     this.indexCache.max = this.options.cacheIndexes;
 
     this.start();
+  }
+
+  private async getDb() {
+    if (this.db) return this.db;
+    this.db = await openDB();
+    return this.db;
   }
 
   /** Write events to the database */
@@ -112,9 +119,10 @@ export class NostrIDB implements INostrIDB {
 
     log("Starting");
     this.running = true;
+    const db = await this.getDb();
     await this.flush();
     this.pruneInterval = self.setInterval(() => {
-      pruneLastUsed(this.db, this.options.maxEvents);
+      pruneLastUsed(db, this.options.maxEvents);
     }, this.options.pruneInterval);
   }
 
@@ -157,7 +165,8 @@ export class NostrIDB implements INostrIDB {
 
   /** Get a single event by its ID */
   async event(id: string): Promise<NostrEvent | undefined> {
-    const result = await this.db.get("events", id);
+    const db = await this.getDb();
+    const result = await db.get("events", id);
     return result?.event;
   }
 
@@ -173,7 +182,8 @@ export class NostrIDB implements INostrIDB {
 
   /** Count events matching the given filters */
   async count(filters: Filter[]): Promise<number> {
-    return await countEventsForFilters(this.db, filters);
+    const db = await this.getDb();
+    return await countEventsForFilters(db, filters);
   }
 
   /** Get events matching the given filters */
@@ -203,7 +213,8 @@ export class NostrIDB implements INostrIDB {
 
   /** Delete a single event by its ID or UID */
   async deleteEvent(eventId: string): Promise<boolean> {
-    const deleted = await deleteEvent(this.db, eventId, this.indexCache);
+    const db = await this.getDb();
+    const deleted = await deleteEvent(db, eventId, this.indexCache);
 
     if (deleted) {
       // Remove from in-memory event map
@@ -219,8 +230,9 @@ export class NostrIDB implements INostrIDB {
     kind: number,
     identifier?: string,
   ): Promise<boolean> {
+    const db = await this.getDb();
     const deleted = await deleteReplaceable(
-      this.db,
+      db,
       pubkey,
       kind,
       identifier,
@@ -238,14 +250,11 @@ export class NostrIDB implements INostrIDB {
 
   /** Delete events matching the given filters */
   async deleteByFilters(filters: Filter[]): Promise<number> {
+    const db = await this.getDb();
     // Get event IDs before deletion to clean up eventMap
     const eventIds = await this.getEventIdsForFilters(filters);
 
-    const deletedCount = await deleteByFilters(
-      this.db,
-      filters,
-      this.indexCache,
-    );
+    const deletedCount = await deleteByFilters(db, filters, this.indexCache);
 
     if (deletedCount > 0) {
       // Remove deleted events from in-memory event map
@@ -259,7 +268,8 @@ export class NostrIDB implements INostrIDB {
 
   /** Delete all events from the database */
   async deleteAllEvents(): Promise<void> {
-    await deleteAllEvents(this.db, this.indexCache);
+    const db = await this.getDb();
+    await deleteAllEvents(db, this.indexCache);
 
     // Clear in-memory event map
     this.eventMap.clear();
@@ -267,8 +277,9 @@ export class NostrIDB implements INostrIDB {
 
   /** Helper method to get event IDs for filters (used internally) */
   private async getEventIdsForFilters(filters: Filter[]): Promise<string[]> {
+    const db = await this.getDb();
     const { getIdsForFilters } = await import("../database/query-filter.js");
-    const eventIds = await getIdsForFilters(this.db, filters, this.indexCache);
+    const eventIds = await getIdsForFilters(db, filters, this.indexCache);
     return Array.from(eventIds);
   }
 
@@ -305,51 +316,49 @@ export class NostrIDB implements INostrIDB {
     // load any events from the write queue
     const eventsFromQueue = this.writeQueue.matchPending(sub.filters);
 
-    return new Promise<void>((res, rej) => {
+    return new Promise<void>(async (res) => {
+      const db = await this.getDb();
       const timeout = setTimeout(() => {
         if (sub.eose && !sub.closed) sub.eose();
         res();
       }, this.baseEoseTimeout);
 
       // get events
-      getEventsForFilters(
-        this.db,
-        sub.filters,
-        this.indexCache,
-        this.eventMap,
-      ).then((filterEvents) => {
-        clearTimeout(timeout);
-        this.addToEventMaps(filterEvents);
+      getEventsForFilters(db, sub.filters, this.indexCache, this.eventMap).then(
+        (filterEvents) => {
+          clearTimeout(timeout);
+          this.addToEventMaps(filterEvents);
 
-        if (sub.event && !sub.closed) {
-          const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+          if (sub.event && !sub.closed) {
+            const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
 
-          const events =
-            eventsFromQueue.length > 0
-              ? [
-                  ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
-                  ...eventsFromQueue,
-                ].sort(sortByDate)
-              : filterEvents;
+            const events =
+              eventsFromQueue.length > 0
+                ? [
+                    ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+                    ...eventsFromQueue,
+                  ].sort(sortByDate)
+                : filterEvents;
 
-          for (const event of events) {
-            try {
-              sub.event(event);
-              this.writeQueue.touch(event);
-            } catch (error) {
-              log(`onevent failed with error`, error);
+            for (const event of events) {
+              try {
+                sub.event(event);
+                this.writeQueue.touch(event);
+              } catch (error) {
+                log(`event handler failed with error`, error);
+              }
             }
+
+            const delta = new Date().valueOf() - start;
+            log(
+              `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
+            );
           }
 
-          const delta = new Date().valueOf() - start;
-          log(
-            `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
-          );
-        }
-
-        if (sub.eose && !sub.closed) sub.eose();
-        res();
-      });
+          if (sub.eose && !sub.closed) sub.eose();
+          res();
+        },
+      );
     });
   }
 
