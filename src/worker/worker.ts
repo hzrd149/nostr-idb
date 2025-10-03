@@ -1,21 +1,35 @@
 /// <reference lib="webworker" />
 import { openDB } from "../database/database.js";
 import { logger } from "../debug.js";
-import { RelayCore } from "../relay/relay-core.js";
-import { connectRelayToWorkerContext } from "./utils.js";
+import { NostrIDB } from "../nostrdb/nostrdb.js";
+import { WorkerRPCServer, RPCRequest } from "./utils.js";
 
-const db = await openDB();
-const relay = new RelayCore(db);
 const log = logger.extend("worker");
 
-relay.start();
+let nostrdb: NostrIDB | null = null;
+async function getNostrDB() {
+  if (nostrdb) return nostrdb;
 
-// connect the relay to the worker context
-connectRelayToWorkerContext(
-  relay,
-  (listener) => addEventListener("message", listener),
-  (message) => postMessage(message),
-);
+  log("Opening database");
+  const db = await openDB();
+  nostrdb = new NostrIDB(db);
+  return nostrdb;
+}
+
+async function getRPCServer() {
+  const nostrdb = await getNostrDB();
+  return new WorkerRPCServer(nostrdb);
+}
+
+// Handle messages from the main thread
+addEventListener("message", async (event) => {
+  const data = event.data as RPCRequest;
+
+  if (data && typeof data === "object" && "method" in data && "id" in data) {
+    const rpc = await getRPCServer();
+    const response = await rpc.handleRequest(data);
+    postMessage(response);
+  }
+});
 
 log("Started");
-postMessage("hello world");

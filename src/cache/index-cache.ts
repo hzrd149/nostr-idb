@@ -1,6 +1,6 @@
-import type { Event } from "nostr-tools";
-import { getEventTags } from "../database/ingest.js";
+import type { NostrEvent } from "nostr-tools/pure";
 import { logger } from "../debug.js";
+import { getEventTags } from "../database/common.js";
 
 const log = logger.extend("cache:indexes");
 
@@ -71,7 +71,7 @@ export class IndexCache {
     this.pruneIndexes();
   }
 
-  addEventToIndexes(event: Event) {
+  addEventToIndexes(event: NostrEvent) {
     this.getKindIndex(event.kind)?.add(event.id);
     this.getPubkeyIndex(event.pubkey)?.add(event.id);
 
@@ -79,6 +79,23 @@ export class IndexCache {
     for (const tag of tags) {
       this.getTagIndex(tag)?.add(event.id);
     }
+  }
+
+  removeEvent(event: NostrEvent) {
+    this.getKindIndex(event.kind)?.delete(event.id);
+    this.getPubkeyIndex(event.pubkey)?.delete(event.id);
+
+    const tags = getEventTags(event);
+    for (const tag of tags) {
+      this.getTagIndex(tag)?.delete(event.id);
+    }
+  }
+
+  clear() {
+    this.kinds.clear();
+    this.pubkeys.clear();
+    this.tags.clear();
+    this.lastUsed = [];
   }
 
   pruneIndexes() {

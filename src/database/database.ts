@@ -1,22 +1,22 @@
 import {
   DeleteDBCallbacks,
-  OpenDBCallbacks,
   deleteDB as idbDeleteDB,
   openDB as idbOpenDB,
   IDBPTransaction,
+  OpenDBCallbacks,
 } from "idb";
 import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
-import { NostrIDB, Schema } from "./schema.js";
-import { getEventUID } from "./ingest.js";
+import { getEventUID } from "./common.js";
+import { NostrIDBDatabase, Schema } from "./schema.js";
 
 export const NOSTR_IDB_NAME = "nostr-idb";
 export const NOSTR_IDB_VERSION = 3;
 
-/** Open the database */
+/** Open a database with the given name and version */
 export async function openDB(
   name = NOSTR_IDB_NAME,
   callbacks?: OpenDBCallbacks<Schema>,
-): Promise<NostrIDB> {
+): Promise<NostrIDBDatabase> {
   return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
     ...callbacks,
     async upgrade(db, oldVersion, newVersion, transaction, event) {
@@ -50,7 +50,7 @@ export async function openDB(
   });
 }
 
-/** Delete the database */
+/** Delete a database with the given name and version */
 export async function deleteDB(
   name = NOSTR_IDB_NAME,
   callbacks?: DeleteDBCallbacks,
@@ -58,8 +58,8 @@ export async function deleteDB(
   return await idbDeleteDB(name, callbacks);
 }
 
-/** Clear the database */
-export async function clearDB(db: NostrIDB) {
+/** Clear all events and used from the database */
+export async function clearDB(db: NostrIDBDatabase) {
   await db.clear("events");
   await db.clear("used");
 }

@@ -4,7 +4,7 @@
     getEventsForFilter,
     openDB,
     pruneLastUsed,
-  } from "../../dist/index.js";
+  } from "../dist/index.js";
   const db = await openDB();
   const indexCache = new IndexCache();
 
@@ -13,9 +13,9 @@
 </script>
 
 <script lang="js">
-  import { addEvents, countEvents } from "../../dist/index.js";
-  import EventLine from "../common/EventLine.svelte";
-  import ImportEvents from "../common/ImportEvents.svelte";
+  import { addEvents, countEvents } from "../dist/index.js";
+  import EventLine from "./common/EventLine.svelte";
+  import ImportEvents from "./common/ImportEvents.svelte";
 
   let filterStr = JSON.stringify(
     {

@@ -1,13 +1,14 @@
 import type { DBSchema, IDBPDatabase } from "idb";
-import type { Event } from "nostr-tools";
+import type { NostrEvent } from "nostr-tools/pure";
 
-export type NostrIDB = IDBPDatabase<Schema>;
+export type NostrIDBDatabase = IDBPDatabase<Schema>;
 
+/** Schema type for `idb` package */
 export interface Schema extends DBSchema {
   events: {
     key: string;
     value: {
-      event: Event;
+      event: NostrEvent;
       tags: string[];
     };
     indexes: {

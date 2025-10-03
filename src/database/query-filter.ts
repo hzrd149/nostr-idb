@@ -1,12 +1,13 @@
-import type { Event, Filter, NostrEvent } from "nostr-tools";
-import type { NostrIDB } from "./schema.js";
-import { GENERIC_TAGS } from "./common.js";
-import { sortByDate } from "../utils.js";
+import type { NostrEvent } from "nostr-tools/pure";
+import type { Filter } from "nostr-tools/filter";
 import { IndexCache } from "../cache/index-cache.js";
+import { sortByDate } from "../utils.js";
+import { INDEXABLE_TAGS } from "./common.js";
+import type { NostrIDBDatabase } from "./schema.js";
 
-/** Query for events by pubkey */
-export async function queryForPubkeys(
-  db: NostrIDB,
+/** Return all events for the given pubkeys */
+export function queryForPubkeys(
+  db: NostrIDBDatabase,
   authors: Filter["authors"] = [],
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
@@ -24,7 +25,7 @@ export async function queryForPubkeys(
   }
 
   // all indexes where loaded from indexCache
-  if (loaded.length === authors.length) return ids;
+  if (loaded.length === authors.length) return Promise.resolve(ids);
 
   // load remaining indexes from db
   const trans = db.transaction("events", "readonly");
@@ -47,9 +48,9 @@ export async function queryForPubkeys(
   return Promise.all(promises).then(() => ids);
 }
 
-/** Query for events by indexable tag */
-export async function queryForTag(
-  db: NostrIDB,
+/** Return all events for the given indexable tag (OR logic) */
+export function queryForTag(
+  db: NostrIDBDatabase,
   tag: string,
   values: string[],
   indexCache?: IndexCache,
@@ -68,7 +69,7 @@ export async function queryForTag(
   }
 
   // all indexes where loaded from indexCache
-  if (loaded.length === values.length) return ids;
+  if (loaded.length === values.length) return Promise.resolve(ids);
 
   // load remaining indexes from db
   const trans = db.transaction("events", "readonly");
@@ -89,9 +90,9 @@ export async function queryForTag(
   return Promise.all(promises).then(() => ids);
 }
 
-/** Query for events by kind */
-export async function queryForKinds(
-  db: NostrIDB,
+/** Return all events for the given kinds */
+export function queryForKinds(
+  db: NostrIDBDatabase,
   kinds: Filter["kinds"] = [],
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
@@ -110,7 +111,7 @@ export async function queryForKinds(
   }
 
   // all indexes where loaded from indexCache
-  if (loaded.length === kinds.length) return ids;
+  if (loaded.length === kinds.length) return Promise.resolve(ids);
 
   // load remaining indexes from db
   const trans = db.transaction("events", "readonly");
@@ -130,9 +131,9 @@ export async function queryForKinds(
   return Promise.all(promises).then(() => ids);
 }
 
-/** Query for events by time */
+/** Return all events for the given time range */
 export async function queryForTime(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   since: number | undefined,
   until: number | undefined,
 ): Promise<string[]> {
@@ -149,9 +150,9 @@ export async function queryForTime(
   return ids;
 }
 
-/** Get ids for a filter */
+/** Return all events for the given filter */
 export async function getIdsForFilter(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   filter: Filter,
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
@@ -176,7 +177,7 @@ export async function getIdsForFilter(
     and(timeFilterIds);
   }
 
-  for (const t of GENERIC_TAGS) {
+  for (const t of INDEXABLE_TAGS) {
     const key = `#${t}`;
     const values = filter[key as `#${string}`];
     if (values?.length) and(await queryForTag(db, t, values, indexCache));
@@ -206,9 +207,9 @@ export async function getIdsForFilter(
   return ids;
 }
 
-/** Get ids for a list of filters */
+/** Return all events for the given filters */
 export async function getIdsForFilters(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   filters: Filter[],
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
@@ -224,14 +225,14 @@ export async function getIdsForFilters(
   return ids;
 }
 
-/** Load events by uid */
+/** Return all events for the given uids */
 async function loadEventsByUID(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   uids: string[],
   filters: Filter[],
   eventMap?: Map<string, NostrEvent>,
-) {
-  const eventBuffer: Event[] = [];
+): Promise<NostrEvent[]> {
+  const eventBuffer: NostrEvent[] = [];
 
   // load from in-memory event map
   let remainingIds: string[] = [];
@@ -246,7 +247,8 @@ async function loadEventsByUID(
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
 
-  const handleEntry = (e?: { event: Event }) => e && eventBuffer.push(e.event);
+  const handleEntry = (e?: { event: NostrEvent }) =>
+    e && eventBuffer.push(e.event);
   const promises = Array.from(remainingIds).map((uid) =>
     objectStore.get(uid).then(handleEntry),
   );
@@ -265,31 +267,31 @@ async function loadEventsByUID(
   return sorted;
 }
 
-/** Get events for a filter */
+/** Return all events for the given filter */
 export async function getEventsForFilter(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   filter: Filter,
   indexCache?: IndexCache,
   eventMap?: Map<string, NostrEvent>,
-): Promise<Event[]> {
+): Promise<NostrEvent[]> {
   const ids = await getIdsForFilter(db, filter, indexCache);
   return await loadEventsByUID(db, Array.from(ids), [filter], eventMap);
 }
 
-/** Get events for an array of filters */
+/** Return all events for the given filters */
 export async function getEventsForFilters(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   filters: Filter[],
   indexCache?: IndexCache,
   eventMap?: Map<string, NostrEvent>,
-): Promise<Event[]> {
+): Promise<NostrEvent[]> {
   const ids = await getIdsForFilters(db, filters, indexCache);
   return await loadEventsByUID(db, Array.from(ids), filters, eventMap);
 }
 
-/** Count events for a filter */
+/** Return the number of events for the given filter */
 export async function countEventsForFilter(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   filter: Filter,
   indexCache?: IndexCache,
 ): Promise<number> {
@@ -297,9 +299,9 @@ export async function countEventsForFilter(
   return ids.size;
 }
 
-/** Count events for an array of filters */
+/** Return the number of events for the given filters */
 export async function countEventsForFilters(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   filters: Filter[],
   indexCache?: IndexCache,
 ): Promise<number> {

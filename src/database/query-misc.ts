@@ -1,17 +1,19 @@
-import type { Event } from "nostr-tools";
-import { NostrIDB } from "./schema.js";
+import type { NostrEvent } from "nostr-tools/pure";
+import { NostrIDBDatabase } from "./schema.js";
 
-/** Get events for address pointers */
-export async function getEventsFromAddressPointers(
-  db: NostrIDB,
+/** Returns the events from the given address pointers */
+export async function getReplaceableEvents(
+  db: NostrIDBDatabase,
   pointers: { kind: number; pubkey: string; identifier?: string }[],
-) {
+): Promise<NostrEvent[]> {
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
 
-  const events: Record<string, Event> = {};
+  const events: Record<string, NostrEvent> = {};
   const promises = pointers.map(async (pointer) => {
-    const key = `${pointer.kind}:${pointer.pubkey}:${pointer.identifier ?? ""}`;
+    const key = [pointer.kind, pointer.pubkey, pointer.identifier ?? ""].join(
+      ":",
+    );
     const row = await objectStore.get(key);
 
     if (row) {
@@ -29,8 +31,10 @@ export async function getEventsFromAddressPointers(
   return sorted;
 }
 
-/** Count events by pubkey */
-export async function countEventsByPubkeys(db: NostrIDB) {
+/** Counts the number of events by each pubkey */
+export async function countEventsByPubkeys(
+  db: NostrIDBDatabase,
+): Promise<Record<string, number>> {
   let cursor = await db
     .transaction("events", "readonly")
     .objectStore("events")
@@ -48,8 +52,10 @@ export async function countEventsByPubkeys(db: NostrIDB) {
   return counts;
 }
 
-/** Count events by kind */
-export async function countEventsByKind(db: NostrIDB) {
+/** Counts the number of events by each kind */
+export async function countEventsByKind(
+  db: NostrIDBDatabase,
+): Promise<Record<string, number>> {
   let cursor = await db
     .transaction("events", "readonly")
     .objectStore("events")
@@ -67,7 +73,7 @@ export async function countEventsByKind(db: NostrIDB) {
   return counts;
 }
 
-/** Count all events in the database */
-export function countEvents(db: NostrIDB) {
+/** Returns the total number of events in the database */
+export function countEvents(db: NostrIDBDatabase): Promise<number> {
   return db.transaction("events", "readonly").store.count();
 }

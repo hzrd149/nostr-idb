@@ -3,11 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>nostr-idb Examples</title>
+    <link rel="stylesheet" href="./common/page-styles.css" />
   </head>
   <body>
-    <a href="/nostr-idb/basic/index.html">Basic</a>
-    <a href="/nostr-idb/nostr-tools/index.html">nostr-tools</a>
-    <a href="/nostr-idb/ndk/index.html">ndk</a>
+    <div id="app"></div>
+    <script type="module">
+      import App from "./App.svelte";
+      new App({ target: document.getElementById("app") });
+    </script>
   </body>
 </html>

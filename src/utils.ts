@@ -1,5 +1,6 @@
-import type { Event } from "nostr-tools";
+import type { NostrEvent } from "nostr-tools/pure";
 
-export function sortByDate(a: Event, b: Event) {
+/** Sort nostr events by created_at */
+export function sortByDate(a: NostrEvent, b: NostrEvent) {
   return b.created_at - a.created_at;
 }

@@ -1,33 +1,47 @@
 /** @lib WebWorker */
-import type { NostrIDB } from "../database/schema.js";
+import type { NostrIDBDatabase } from "../database/schema.js";
 import { openDB } from "../database/database.js";
-import { RelayCore } from "../relay/relay-core.js";
-import { connectRelayToMessagePort } from "./utils.js";
+import { NostrIDB } from "../nostrdb/nostrdb.js";
 import { logger } from "../debug.js";
+import { WorkerRPCServer, RPCRequest } from "./utils.js";
 
-let db: NostrIDB;
-let relay: RelayCore;
+let db: NostrIDBDatabase;
+let nostrdb: NostrIDB;
 let log = logger.extend("shared-worker");
 
-let wait: Promise<RelayCore> | null = openDB().then((database) => {
+let wait: Promise<NostrIDB> | null = openDB().then((database) => {
   db = database;
-  relay = new RelayCore(db);
-  relay.start();
+  nostrdb = new NostrIDB(db);
   wait = null;
-  return relay;
+  return nostrdb;
 });
 
-function getRelay() {
+function getNostrDB() {
   if (wait) return wait;
-  return relay;
+  return nostrdb;
 }
 
 // @ts-ignore
 onconnect = async (event: MessageEvent) => {
   log("Connecting to new window");
   const port = event.ports[0];
-  const core = await getRelay();
-  connectRelayToMessagePort(core, port);
+  const core = await getNostrDB();
+
+  // Create RPC server with port's postMessage function
+  const rpcServer = new WorkerRPCServer(core, (message) =>
+    port.postMessage(message),
+  );
+
+  // Handle messages from the connected port
+  port.onmessage = async (event: MessageEvent) => {
+    const data = event.data as RPCRequest;
+
+    if (data && typeof data === "object" && "method" in data && "id" in data) {
+      const response = await rpcServer.handleRequest(data);
+      port.postMessage(response);
+    }
+  };
+
   port.start();
   port.postMessage("hello world");
 };

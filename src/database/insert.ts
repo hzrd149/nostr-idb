@@ -1,33 +1,13 @@
-import { type Event } from "nostr-tools";
-
+import { type NostrEvent, validateEvent } from "nostr-tools/pure";
 import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
-import { GENERIC_TAGS } from "./common.js";
-import type { NostrIDB } from "./schema.js";
+import { getEventTags, getEventUID } from "./common.js";
+import type { NostrIDBDatabase } from "./schema.js";
 
-export const EventUIDSymbol = Symbol.for("event-uid");
+/** Add events to the database */
+export async function addEvents(db: NostrIDBDatabase, events: NostrEvent[]) {
+  // filter out invalid events
+  events = events.filter((event) => validateEvent(event));
 
-/** Returns an events tags as an array of string for indexing */
-export function getEventTags(event: Event) {
-  return event.tags
-    .filter(
-      (t) => t.length >= 2 && t[0].length === 1 && GENERIC_TAGS.includes(t[0]),
-    )
-    .map((t) => t[0] + t[1]);
-}
-
-/** Returns the events Unique ID */
-export function getEventUID(event: Event) {
-  if (event[EventUIDSymbol]) return event[EventUIDSymbol];
-
-  if (isReplaceableKind(event.kind) || isAddressableKind(event.kind)) {
-    const d = event.tags.find((t) => t[0] === "d")?.[1];
-    return (event[EventUIDSymbol] =
-      "" + event.kind + ":" + event.pubkey + ":" + (d ?? ""));
-  } else return (event[EventUIDSymbol] = event.id);
-}
-
-/** Inserts an array of events into the database */
-export async function addEvents(db: NostrIDB, events: Event[]) {
   const replaceableEvents = events.filter(
     (e) => isReplaceableKind(e.kind) || isAddressableKind(e.kind),
   );
@@ -63,8 +43,8 @@ export async function addEvents(db: NostrIDB, events: Event[]) {
   await writeTransaction.commit();
 }
 
-/** Sets the last used date on a list of events */
-export async function updateUsed(db: NostrIDB, uids: Iterable<string>) {
+/** Update the last used timestamp of the given uids */
+export async function updateUsed(db: NostrIDBDatabase, uids: Iterable<string>) {
   const trans = db.transaction("used", "readwrite");
   const nowUnix = Math.floor(new Date().valueOf() / 1000);
 

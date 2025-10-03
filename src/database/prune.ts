@@ -1,7 +1,7 @@
-import { NostrEvent } from "nostr-tools";
+import { NostrEvent } from "nostr-tools/pure";
 import { logger } from "../debug.js";
 import { countEvents } from "./query-misc.js";
-import { NostrIDB } from "./schema.js";
+import { NostrIDBDatabase } from "./schema.js";
 
 const log = logger.extend("prune");
 
@@ -11,7 +11,7 @@ const log = logger.extend("prune");
  * @param maxEvents the max number of events to leave in the db
  */
 export async function pruneLastUsed(
-  db: NostrIDB,
+  db: NostrIDBDatabase,
   maxEvents: number,
   skip?: (event: NostrEvent) => boolean,
 ) {
