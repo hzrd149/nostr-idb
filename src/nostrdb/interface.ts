@@ -13,10 +13,7 @@ export type StreamHandlers = {
 };
 
 /** Standard enums for feature checks */
-export enum Features {
-  Search = "search",
-  Subscribe = "subscribe",
-}
+export type Features = "search" | "subscribe";
 
 /** Main interface for the nostr event store */
 export interface INostrIDB {
@@ -40,7 +37,7 @@ export interface INostrIDB {
   supports(): Promise<Features[]>;
 
   /** Get events by filters */
-  filters(filters: Filter[], handlers: StreamHandlers): Subscription;
+  filters(filters: Filter[]): Promise<NostrEvent[]>;
 
   /** Subscribe to events in the database based on filters */
   subscribe(filters: Filter[], handlers: StreamHandlers): Subscription;

@@ -31,7 +31,7 @@ export type RPCMethod =
   | { method: "deleteReplaceable"; params: [string, number, string?] }
   | { method: "deleteByFilters"; params: [Filter[]] }
   | { method: "deleteAllEvents"; params: [] }
-  | { method: "filters"; params: [Filter[], string] }
+  | { method: "filters"; params: [Filter[]] }
   | { method: "subscribe"; params: [Filter[], string] }
   | { method: "close"; params: [string] };
 
@@ -44,6 +44,7 @@ export type RPCRequest = RPCMethod & {
 export type RPCResult =
   | boolean
   | NostrEvent
+  | NostrEvent[]
   | undefined
   | number
   | Features[]
@@ -156,9 +157,11 @@ export class WorkerRPCClient {
     >;
   }
 
-  filters(filters: Filter[], handlers: StreamHandlers): Subscription {
-    const subId = this.createSubscription(filters, handlers, "filters");
-    return { close: () => this.closeSubscription(subId) };
+  async filters(filters: Filter[]): Promise<NostrEvent[]> {
+    return this.sendMessage({
+      method: "filters",
+      params: [filters],
+    }) as Promise<NostrEvent[]>;
   }
 
   subscribe(filters: Filter[], handlers: StreamHandlers): Subscription {
@@ -169,7 +172,7 @@ export class WorkerRPCClient {
   private createSubscription(
     filters: Filter[],
     handlers: StreamHandlers,
-    method: "filters" | "subscribe",
+    method: "subscribe",
   ): string {
     const subId = `sub_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
@@ -275,29 +278,7 @@ export class WorkerRPCServer {
           result = undefined;
           break;
         case "filters":
-          this.core.filters(params[0], {
-            event: (event) => {
-              this.sendSubscriptionResponse({
-                type: "subscription_event",
-                subscriptionId: params[1],
-                event,
-              });
-            },
-            complete: () => {
-              this.sendSubscriptionResponse({
-                type: "subscription_complete",
-                subscriptionId: params[1],
-              });
-            },
-            error: (error) => {
-              this.sendSubscriptionResponse({
-                type: "subscription_error",
-                subscriptionId: params[1],
-                error: error.message,
-              });
-            },
-          });
-          result = true;
+          result = await this.core.filters(params[0]);
           break;
         case "subscribe":
           this.core.subscribe(params[0], {
