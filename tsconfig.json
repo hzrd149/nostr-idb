@@ -11,6 +11,6 @@
     "allowImportingTsExtensions": false,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["src"],
+  "include": ["src", "tests/**/*.ts"],
   "exclude": ["example"]
 }

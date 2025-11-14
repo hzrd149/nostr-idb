@@ -16,7 +16,7 @@ export async function addEvents(db: NostrIDBDatabase, events: NostrEvent[]) {
     const readTransaction = db.transaction("events", "readonly");
     const promises = replaceableEvents.map((e) => {
       const uid = getEventUID(e);
-      readTransaction.store
+      return readTransaction.store
         .get(uid)
         .then((r) => r && (existingEvents[uid] = r.event.created_at));
     });

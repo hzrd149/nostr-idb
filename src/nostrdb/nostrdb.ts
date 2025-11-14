@@ -64,8 +64,8 @@ const log = logger.extend("nostridb");
 export class NostrIDB implements INostrIDB {
   options: Required<NostrDBOptions>;
   running = false;
-  private writeInterval?: number;
-  private pruneInterval?: number;
+  private writeInterval?: ReturnType<typeof setTimeout>;
+  private pruneInterval?: ReturnType<typeof setInterval>;
 
   /** In-memory map of events */
   eventMap = new Map<string, NostrEvent>();
@@ -116,7 +116,7 @@ export class NostrIDB implements INostrIDB {
     await queue.flush();
 
     // start next flush cycle
-    this.writeInterval = self.setTimeout(
+    this.writeInterval = setTimeout(
       this.flush.bind(this),
       this.options.writeInterval,
     );
@@ -130,7 +130,7 @@ export class NostrIDB implements INostrIDB {
     this.running = true;
     const db = await this.getDb();
     await this.flush();
-    this.pruneInterval = self.setInterval(() => {
+    this.pruneInterval = setInterval(() => {
       pruneLastUsed(db, this.options.maxEvents);
     }, this.options.pruneInterval);
   }
@@ -139,11 +139,11 @@ export class NostrIDB implements INostrIDB {
   public async stop() {
     if (!this.running) return;
     if (this.writeInterval) {
-      self.clearTimeout(this.writeInterval);
+      clearTimeout(this.writeInterval);
       this.writeInterval = undefined;
     }
     if (this.pruneInterval) {
-      self.clearInterval(this.pruneInterval);
+      clearInterval(this.pruneInterval);
       this.pruneInterval = undefined;
     }
     this.running = false;
@@ -246,10 +246,8 @@ export class NostrIDB implements INostrIDB {
     const db = await this.getDb();
     const deleted = await deleteEvent(db, eventId, this.indexCache);
 
-    if (deleted) {
-      // Remove from in-memory event map
-      this.eventMap.delete(eventId);
-    }
+    // Remove from in-memory event map
+    this.eventMap.delete(eventId);
 
     return deleted;
   }
