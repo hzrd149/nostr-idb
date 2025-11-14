@@ -9,8 +9,6 @@ Live Examples: https://hzrd149.github.io/nostr-idb/
   - [openDB](#openDB)
   - [clearDB](#clearDB)
   - [deleteDB](#deleteDB)
-- [nostr-tools](#nostr-tools)
-  - [CacheRelay](#CacheRelay)
 - [Performance](#Performance)
 
 ## Features
@@ -18,7 +16,6 @@ Live Examples: https://hzrd149.github.io/nostr-idb/
 - Built directly on top of IndexedDB for the lowest latency
 - Caches indexes in memory
 - `NostrIDB` class with full nostr relay-like API
-- `CacheRelay` class with similar API to nostr-tool `Relay` class
 
 ## NostrIDB Class
 
