@@ -12,7 +12,7 @@ import { openDB } from "../database.js";
 import { IndexCache } from "../../cache/index-cache.js";
 import type { NostrEvent } from "nostr-tools/pure";
 import type { NostrIDBDatabase } from "../schema.js";
-import { createTestEvent, getTestPublicKey } from "../../../tests/helpers.js";
+import { createTestEvent, getTestPublicKey } from "../../__tests__/helpers.js";
 
 describe("Query Filter", () => {
   let db: NostrIDBDatabase;

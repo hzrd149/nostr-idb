@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  getEventUID,
-  getEventTags,
-  INDEXABLE_TAGS,
-} from "../common.js";
+import { getEventUID, getEventTags, INDEXABLE_TAGS } from "../common.js";
 import type { NostrEvent } from "nostr-tools/pure";
 
 describe("getEventUID", () => {

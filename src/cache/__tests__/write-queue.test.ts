@@ -4,7 +4,7 @@ import { openDB } from "../../database/database.js";
 import { getEventUID } from "../../database/common.js";
 import type { NostrEvent } from "nostr-tools/pure";
 import type { NostrIDBDatabase } from "../../database/schema.js";
-import { createTestEvent } from "../../../tests/helpers.js";
+import { createTestEvent } from "../../__tests__/helpers.js";
 
 describe("WriteQueue", () => {
   let db: NostrIDBDatabase;

@@ -4,7 +4,7 @@ import { openDB } from "../database.js";
 import { getEventUID } from "../common.js";
 import type { NostrEvent } from "nostr-tools/pure";
 import type { NostrIDBDatabase } from "../schema.js";
-import { createTestEvent, getTestPublicKey } from "../../../tests/helpers.js";
+import { createTestEvent, getTestPublicKey } from "../../__tests__/helpers.js";
 
 describe("addEvents", () => {
   let db: NostrIDBDatabase;
@@ -184,7 +184,12 @@ describe("addEvents", () => {
       // Create events with explicit timestamps
       const now = Math.floor(Date.now() / 1000);
       const newEvent = createEvent(30023, now, [["d", "article-1"]], "newer");
-      const oldEvent = createEvent(30023, now - 10, [["d", "article-1"]], "older");
+      const oldEvent = createEvent(
+        30023,
+        now - 10,
+        [["d", "article-1"]],
+        "older",
+      );
 
       // Add newer event first
       await addEvents(db, [newEvent]);
