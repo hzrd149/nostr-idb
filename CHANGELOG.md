@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 4.0.0
+
+### Major Changes
+
+- 7f9b180: Change `NostrIDB.filters` method to return `Promise<NostrEvent[]>` instead of stream handlers
+
 ## 3.0.0
 
 ### Major Changes
