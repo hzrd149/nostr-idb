@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 4.0.1
+
+### Patch Changes
+
+- 9d32650: Fix missing files in package
+
 ## 4.0.0
 
 ### Major Changes
