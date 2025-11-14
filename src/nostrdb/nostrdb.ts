@@ -16,7 +16,7 @@ import {
   countEventsForFilters,
   getEventsForFilters,
 } from "../database/query-filter.js";
-import { NostrIDBDatabase } from "../database/schema.js";
+import type { NostrIDBDatabase } from "../database/schema.js";
 import { logger } from "../debug.js";
 import { nanoid } from "../lib/nanoid.js";
 import { sortByDate } from "../utils.js";
@@ -64,8 +64,8 @@ const log = logger.extend("nostridb");
 export class NostrIDB implements INostrIDB {
   options: Required<NostrDBOptions>;
   running = false;
-  private writeInterval?: number;
-  private pruneInterval?: number;
+  private writeInterval?: ReturnType<typeof setTimeout>;
+  private pruneInterval?: ReturnType<typeof setInterval>;
 
   /** In-memory map of events */
   eventMap = new Map<string, NostrEvent>();
@@ -116,7 +116,7 @@ export class NostrIDB implements INostrIDB {
     await queue.flush();
 
     // start next flush cycle
-    this.writeInterval = self.setTimeout(
+    this.writeInterval = setTimeout(
       this.flush.bind(this),
       this.options.writeInterval,
     );
@@ -130,7 +130,7 @@ export class NostrIDB implements INostrIDB {
     this.running = true;
     const db = await this.getDb();
     await this.flush();
-    this.pruneInterval = self.setInterval(() => {
+    this.pruneInterval = setInterval(() => {
       pruneLastUsed(db, this.options.maxEvents);
     }, this.options.pruneInterval);
   }
@@ -139,11 +139,11 @@ export class NostrIDB implements INostrIDB {
   public async stop() {
     if (!this.running) return;
     if (this.writeInterval) {
-      self.clearTimeout(this.writeInterval);
+      clearTimeout(this.writeInterval);
       this.writeInterval = undefined;
     }
     if (this.pruneInterval) {
-      self.clearInterval(this.pruneInterval);
+      clearInterval(this.pruneInterval);
       this.pruneInterval = undefined;
     }
     this.running = false;
@@ -197,15 +197,35 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Get events matching the given filters */
-  filters(filters: Filter[], handlers: StreamHandlers): Subscription {
-    const sub = this.subscribeInternal(filters, {
-      ...handlers,
-      eose: () => this.unsubscribe(sub.id),
-    });
+  async filters(filters: Filter[]): Promise<NostrEvent[]> {
+    const db = await this.getDb();
+    const queue = await this.getWriteQueue();
 
-    return {
-      close: () => this.unsubscribe(sub.id),
-    };
+    // Get events from queue that match filters
+    const eventsFromQueue = queue.matchPending(filters);
+
+    // Get events from database
+    const filterEvents = await getEventsForFilters(
+      db,
+      filters,
+      this.indexCache,
+      this.eventMap,
+    );
+
+    // Add events to event map
+    this.addToEventMaps(filterEvents);
+
+    // Combine and deduplicate events
+    const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+    const events =
+      eventsFromQueue.length > 0
+        ? [
+            ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+            ...eventsFromQueue,
+          ].sort(sortByDate)
+        : filterEvents;
+
+    return events;
   }
 
   /** Subscribe to events in the database based on filters */
@@ -218,7 +238,7 @@ export class NostrIDB implements INostrIDB {
 
   /** Check if the database backend supports features */
   async supports(): Promise<Features[]> {
-    return [Features.Subscribe];
+    return ["subscribe"];
   }
 
   /** Delete a single event by its ID or UID */
@@ -226,10 +246,8 @@ export class NostrIDB implements INostrIDB {
     const db = await this.getDb();
     const deleted = await deleteEvent(db, eventId, this.indexCache);
 
-    if (deleted) {
-      // Remove from in-memory event map
-      this.eventMap.delete(eventId);
-    }
+    // Remove from in-memory event map
+    this.eventMap.delete(eventId);
 
     return deleted;
   }
@@ -354,7 +372,7 @@ export class NostrIDB implements INostrIDB {
             for (const event of events) {
               try {
                 sub.event(event);
-                queue.touch(event);
+                queue.addEvent(event);
               } catch (error) {
                 log(`event handler failed with error`, error);
               }

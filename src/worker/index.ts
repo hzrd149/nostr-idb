@@ -83,8 +83,8 @@ export class NostrIDBWorkerInterface implements INostrIDB {
     return this.rpc.supports();
   }
 
-  filters(filters: Filter[], handlers: StreamHandlers): Subscription {
-    return this.rpc.filters(filters, handlers);
+  async filters(filters: Filter[]): Promise<NostrEvent[]> {
+    return this.rpc.filters(filters);
   }
 
   subscribe(filters: Filter[], handlers: StreamHandlers): Subscription {
