@@ -1,6 +1,5 @@
-import { defineConfig } from "vite";
-import { resolve } from "path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { defineConfig } from "vite";
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -10,11 +9,5 @@ export default defineConfig({
   build: {
     outDir: "../public",
     target: "es2022",
-    rollupOptions: {
-      input: {
-        local: resolve(__dirname, "examples/basic/index.html"),
-        "nostr-tools": resolve(__dirname, "examples/nostr-tools/index.html"),
-      },
-    },
   },
 });
