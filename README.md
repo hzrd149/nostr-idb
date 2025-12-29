@@ -87,9 +87,9 @@ Count the number of events matching the given filters.
 
 Subscribe to events matching the filters. Returns a subscription object with a `close()` method.
 
-#### `filters(filters: Filter[], handlers: StreamHandlers): Subscription`
+#### `filters(filters: Filter[]): Promise<NostrEvent[]>`
 
-Same as `subscribe` but automatically closes after EOSE (End of Stored Events).
+Query events matching the given filters and return them as an array. This is a one-time query that returns all matching events.
 
 #### `deleteEvent(eventId: string): Promise<boolean>`
 
