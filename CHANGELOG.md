@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 4.1.0
+
+### Minor Changes
+
+- 64c7d85: Add support for NIP-91 AND tag filters
+
 ## 4.0.1
 
 ### Patch Changes
