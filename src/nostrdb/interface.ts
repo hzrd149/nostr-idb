@@ -1,10 +1,20 @@
 import type { NostrEvent } from "../lib/nostr.js";
 import type { Filter } from "../lib/nostr.js";
 
-/** Standard feature flag strings for supports() checks */
-export type Features = "search" | "subscribe";
+/**
+ * Standard feature flag strings for supports() checks.
+ * "search" — NIP-50 full-text search.
+ */
+export type Features = "search";
 
-/** Main interface for the nostr event store */
+/**
+ * Main interface for the nostr event store.
+ *
+ * This is a superset of the NIP-DB `IWindowNostrDB` interface. The `add`,
+ * `event`, `replaceable`, `count`, `supports`, `query`, and `subscribe`
+ * methods are compatible with that spec. The `deleteEvent`, `deleteReplaceable`,
+ * `deleteByFilters`, and `deleteAllEvents` methods are local extensions.
+ */
 export interface INostrIDB {
   /** Add an event to the database */
   add(event: NostrEvent): Promise<boolean>;
@@ -29,7 +39,9 @@ export interface INostrIDB {
   query(filters: Filter | Filter[]): Promise<NostrEvent[]>;
 
   /** Subscribe to events in the database based on filters */
-  subscribe(filters: Filter | Filter[]): AsyncGenerator<NostrEvent>;
+  subscribe(
+    filters: Filter | Filter[],
+  ): AsyncGenerator<NostrEvent, void, undefined>;
 
   /** Delete a single event by its ID or UID */
   deleteEvent(eventId: string): Promise<boolean>;
@@ -42,7 +54,7 @@ export interface INostrIDB {
   ): Promise<boolean>;
 
   /** Delete events matching the given filters */
-  deleteByFilters(filters: Filter[]): Promise<number>;
+  deleteByFilters(filters: Filter | Filter[]): Promise<number>;
 
   /** Delete all events from the database */
   deleteAllEvents(): Promise<void>;

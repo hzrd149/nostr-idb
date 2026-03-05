@@ -233,15 +233,30 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Subscribe to events in the database based on filters */
-  async *subscribe(filters: Filter | Filter[]): AsyncGenerator<NostrEvent> {
+  async *subscribe(
+    filters: Filter | Filter[],
+  ): AsyncGenerator<NostrEvent, void, undefined> {
     const f = Array.isArray(filters) ? filters : [filters];
 
     const queue: NostrEvent[] = [];
+    // seenIds deduplicates events that arrive both as historical (IDB) and live (add())
+    const seenIds = new Set<string>();
     let notify: (() => void) | null = null;
+    let done = false;
 
     const sub = this.subscribeInternal(f, {
       event: (event) => {
+        if (seenIds.has(event.id)) return;
+        seenIds.add(event.id);
         queue.push(event);
+        if (notify) {
+          const fn = notify;
+          notify = null;
+          fn();
+        }
+      },
+      complete: () => {
+        done = true;
         if (notify) {
           const fn = notify;
           notify = null;
@@ -255,7 +270,8 @@ export class NostrIDB implements INostrIDB {
         while (queue.length > 0) {
           yield queue.shift()!;
         }
-        // Wait for the next event to arrive
+        if (done) break;
+        // Wait for the next event or completion signal
         await new Promise<void>((resolve) => {
           notify = resolve;
         });
@@ -267,7 +283,8 @@ export class NostrIDB implements INostrIDB {
 
   /** Check if the database backend supports features */
   async supports(): Promise<string[]> {
-    return ["subscribe"];
+    // "search" — NIP-50 full-text search (when underlying IDB store supports it)
+    return [];
   }
 
   /** Delete a single event by its ID or UID */
@@ -306,12 +323,13 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Delete events matching the given filters */
-  async deleteByFilters(filters: Filter[]): Promise<number> {
+  async deleteByFilters(filters: Filter | Filter[]): Promise<number> {
+    const f = Array.isArray(filters) ? filters : [filters];
     const db = await this.getDb();
     // Get event IDs before deletion to clean up eventMap
-    const eventIds = await this.getEventIdsForFilters(filters);
+    const eventIds = await this.getEventIdsForFilters(f);
 
-    const deletedCount = await deleteByFilters(db, filters, this.indexCache);
+    const deletedCount = await deleteByFilters(db, f, this.indexCache);
 
     if (deletedCount > 0) {
       // Remove deleted events from in-memory event map
