@@ -48,7 +48,7 @@ jobs:
         run: pnpm build
 
       - name: Build Examples
-        run: pnpm build:examples
+        run: pnpm build:examples --base /nostr-idb
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
