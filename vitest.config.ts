@@ -21,7 +21,6 @@ export default defineConfig({
         "tests/**",
         "**/*.d.ts",
         "**/*.config.*",
-        "build.js",
       ],
     },
   },

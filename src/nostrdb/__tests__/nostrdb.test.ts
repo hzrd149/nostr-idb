@@ -66,18 +66,15 @@ describe("NostrIDB", () => {
     });
 
     it("should notify active subscriptions", async () => {
-      const events: NostrEvent[] = [];
-      const subscription = nostrDB.subscribe([{ kinds: [1] }], {
-        event: (event) => events.push(event),
-      });
+      const gen = nostrDB.subscribe([{ kinds: [1] }]);
 
       const event = createEvent(1);
       await nostrDB.add(event);
 
-      expect(events).toHaveLength(1);
-      expect(events[0].id).toBe(event.id);
+      const result = await gen.next();
+      expect(result.value?.id).toBe(event.id);
 
-      subscription.close();
+      await gen.return(undefined);
     });
   });
 
@@ -125,8 +122,8 @@ describe("NostrIDB", () => {
     });
   });
 
-  describe("filters", () => {
-    it("should return events matching filters", async () => {
+  describe("query", () => {
+    it("should return events matching filters array", async () => {
       const events = [
         createEvent(1, 1000),
         createEvent(1, 2000),
@@ -140,11 +137,23 @@ describe("NostrIDB", () => {
       // Wait for flush
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      const result = await nostrDB.filters([{ kinds: [1] }]);
+      const result = await nostrDB.query([{ kinds: [1] }]);
 
       expect(result).toHaveLength(2);
       expect(result[0].created_at).toBe(2000); // Sorted by date, newest first
       expect(result[1].created_at).toBe(1000);
+    });
+
+    it("should accept a single filter (not array)", async () => {
+      const event = createEvent(1);
+      await nostrDB.add(event);
+
+      // Wait for flush
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const result = await nostrDB.query({ kinds: [1] });
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe(event.id);
     });
 
     it("should include pending events from write queue", async () => {
@@ -152,7 +161,7 @@ describe("NostrIDB", () => {
       await nostrDB.add(event1);
 
       // Don't wait for flush, query immediately
-      const result = await nostrDB.filters([{ kinds: [1] }]);
+      const result = await nostrDB.query([{ kinds: [1] }]);
 
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe(event1.id);
@@ -168,7 +177,7 @@ describe("NostrIDB", () => {
       // Add again (will be in queue)
       await nostrDB.add(event);
 
-      const result = await nostrDB.filters([{ kinds: [1] }]);
+      const result = await nostrDB.query([{ kinds: [1] }]);
 
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe(event.id);
@@ -176,7 +185,7 @@ describe("NostrIDB", () => {
   });
 
   describe("count", () => {
-    it("should count events matching filters", async () => {
+    it("should count events matching filters array", async () => {
       const events = [createEvent(1), createEvent(1), createEvent(2)];
 
       for (const event of events) {
@@ -189,57 +198,98 @@ describe("NostrIDB", () => {
       const count = await nostrDB.count([{ kinds: [1] }]);
       expect(count).toBe(2);
     });
+
+    it("should accept a single filter (not array)", async () => {
+      const events = [createEvent(1), createEvent(1), createEvent(2)];
+
+      for (const event of events) {
+        await nostrDB.add(event);
+      }
+
+      // Wait for flush
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const count = await nostrDB.count({ kinds: [1] });
+      expect(count).toBe(2);
+    });
   });
 
   describe("subscribe", () => {
-    it("should call event handler for existing events", async () => {
+    it("should yield existing events from the database", async () => {
       const event = createEvent(1);
       await nostrDB.add(event);
 
       // Wait for flush
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      const events: NostrEvent[] = [];
-      const subscription = nostrDB.subscribe([{ kinds: [1] }], {
-        event: (e) => events.push(e),
-      });
+      const gen = nostrDB.subscribe([{ kinds: [1] }]);
+      const result = await gen.next();
 
-      // Wait for subscription to complete
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(result.done).toBe(false);
+      expect(result.value?.id).toBe(event.id);
 
-      expect(events.length).toBeGreaterThan(0);
-      expect(events[0].id).toBe(event.id);
-
-      subscription.close();
+      await gen.return(undefined);
     });
 
-    it("should receive new events after subscription", async () => {
-      const events: NostrEvent[] = [];
-      const subscription = nostrDB.subscribe([{ kinds: [1] }], {
-        event: (e) => events.push(e),
-      });
+    it("should accept a single filter (not array)", async () => {
+      const event = createEvent(1);
+      await nostrDB.add(event);
+
+      // Wait for flush
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const gen = nostrDB.subscribe({ kinds: [1] });
+      const result = await gen.next();
+
+      expect(result.done).toBe(false);
+      expect(result.value?.id).toBe(event.id);
+
+      await gen.return(undefined);
+    });
+
+    it("should yield new events added after subscription starts", async () => {
+      const gen = nostrDB.subscribe([{ kinds: [1] }]);
 
       const event = createEvent(1);
       await nostrDB.add(event);
 
-      expect(events).toHaveLength(1);
-      expect(events[0].id).toBe(event.id);
+      const result = await gen.next();
+      expect(result.done).toBe(false);
+      expect(result.value?.id).toBe(event.id);
 
-      subscription.close();
+      await gen.return(undefined);
     });
 
-    it("should not receive events after close", async () => {
-      const events: NostrEvent[] = [];
-      const subscription = nostrDB.subscribe([{ kinds: [1] }], {
-        event: (e) => events.push(e),
-      });
+    it("should stop yielding after generator is returned", async () => {
+      const received: string[] = [];
+      const gen = nostrDB.subscribe([{ kinds: [1] }]);
 
-      subscription.close();
+      // Close immediately
+      await gen.return(undefined);
 
+      // Add an event after close — should not be received
       const event = createEvent(1);
       await nostrDB.add(event);
 
-      expect(events).toHaveLength(0);
+      // The subscription should have been cleaned up; subscriptions map empty
+      expect(nostrDB.subscriptions.size).toBe(0);
+      expect(received).toHaveLength(0);
+    });
+
+    it("should clean up the internal subscription when generator is returned", async () => {
+      expect(nostrDB.subscriptions.size).toBe(0);
+
+      const gen = nostrDB.subscribe([{ kinds: [1] }]);
+
+      // Let subscription register
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      await gen.return(undefined);
+
+      // Give the finally block a tick to execute
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(nostrDB.subscriptions.size).toBe(0);
     });
   });
 
@@ -304,7 +354,7 @@ describe("NostrIDB", () => {
       const deletedCount = await nostrDB.deleteByFilters([{ kinds: [1] }]);
       expect(deletedCount).toBe(2);
 
-      const remaining = await nostrDB.filters([{ kinds: [1, 2] }]);
+      const remaining = await nostrDB.query([{ kinds: [1, 2] }]);
       expect(remaining).toHaveLength(1);
       expect(remaining[0].kind).toBe(2);
     });
@@ -330,7 +380,7 @@ describe("NostrIDB", () => {
   });
 
   describe("supports", () => {
-    it("should return supported features", async () => {
+    it("should return supported features as strings", async () => {
       const features = await nostrDB.supports();
       expect(features).toContain("subscribe");
     });

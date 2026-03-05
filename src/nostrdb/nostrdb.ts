@@ -21,22 +21,23 @@ import type { NostrIDBDatabase } from "../database/schema.js";
 import { logger } from "../debug.js";
 import { nanoid } from "../lib/nanoid.js";
 import { sortByDate } from "../utils.js";
-import {
-  Features,
-  type INostrIDB,
-  type StreamHandlers,
-  type Subscription,
-} from "./interface.js";
+import { type INostrIDB } from "./interface.js";
 import { openDB } from "../database/database.js";
 
+/** Internal subscription handlers */
+type InternalHandlers = {
+  event?: (event: NostrEvent) => void;
+  complete?: () => void;
+};
+
 /** Type for internal subscriptions */
-export type InternalSubscription = StreamHandlers &
-  Subscription & {
-    id: string;
-    filters: Filter[];
-    closed: boolean;
-    eose?: () => void;
-  };
+export type InternalSubscription = InternalHandlers & {
+  id: string;
+  filters: Filter[];
+  closed: boolean;
+  close: () => void;
+  eose?: () => void;
+};
 
 export type NostrDBOptions = {
   /** Defaults to 1000 */
@@ -192,23 +193,25 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Count events matching the given filters */
-  async count(filters: Filter[]): Promise<number> {
+  async count(filters: Filter | Filter[]): Promise<number> {
+    const f = Array.isArray(filters) ? filters : [filters];
     const db = await this.getDb();
-    return await countEventsForFilters(db, filters);
+    return await countEventsForFilters(db, f);
   }
 
   /** Get events matching the given filters */
-  async filters(filters: Filter[]): Promise<NostrEvent[]> {
+  async query(filters: Filter | Filter[]): Promise<NostrEvent[]> {
+    const f = Array.isArray(filters) ? filters : [filters];
     const db = await this.getDb();
     const queue = await this.getWriteQueue();
 
     // Get events from queue that match filters
-    const eventsFromQueue = queue.matchPending(filters);
+    const eventsFromQueue = queue.matchPending(f);
 
     // Get events from database
     const filterEvents = await getEventsForFilters(
       db,
-      filters,
+      f,
       this.indexCache,
       this.eventMap,
     );
@@ -230,15 +233,40 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Subscribe to events in the database based on filters */
-  subscribe(filters: Filter[], handlers: StreamHandlers): Subscription {
-    const sub = this.subscribeInternal(filters, handlers);
-    return {
-      close: () => this.unsubscribe(sub.id),
-    };
+  async *subscribe(filters: Filter | Filter[]): AsyncGenerator<NostrEvent> {
+    const f = Array.isArray(filters) ? filters : [filters];
+
+    const queue: NostrEvent[] = [];
+    let notify: (() => void) | null = null;
+
+    const sub = this.subscribeInternal(f, {
+      event: (event) => {
+        queue.push(event);
+        if (notify) {
+          const fn = notify;
+          notify = null;
+          fn();
+        }
+      },
+    });
+
+    try {
+      while (true) {
+        while (queue.length > 0) {
+          yield queue.shift()!;
+        }
+        // Wait for the next event to arrive
+        await new Promise<void>((resolve) => {
+          notify = resolve;
+        });
+      }
+    } finally {
+      sub.close();
+    }
   }
 
   /** Check if the database backend supports features */
-  async supports(): Promise<Features[]> {
+  async supports(): Promise<string[]> {
     return ["subscribe"];
   }
 
@@ -373,7 +401,6 @@ export class NostrIDB implements INostrIDB {
             for (const event of events) {
               try {
                 sub.event(event);
-                queue.addEvent(event);
               } catch (error) {
                 log(`event handler failed with error`, error);
               }
