@@ -1,4 +1,4 @@
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 import { NostrIDBDatabase } from "./schema.js";
 
 /** Returns the events from the given address pointers */

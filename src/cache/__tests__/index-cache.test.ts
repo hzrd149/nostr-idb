@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { IndexCache } from "../index-cache.js";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../../lib/nostr.js";
 
 describe("IndexCache", () => {
   let cache: IndexCache;

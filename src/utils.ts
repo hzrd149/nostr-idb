@@ -1,4 +1,4 @@
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "./lib/nostr.js";
 
 /** Sort nostr events by created_at */
 export function sortByDate(a: NostrEvent, b: NostrEvent) {

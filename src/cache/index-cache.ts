@@ -1,4 +1,4 @@
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 import { logger } from "../debug.js";
 import { getEventTags } from "../database/common.js";
 

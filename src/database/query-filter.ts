@@ -1,9 +1,9 @@
-import type { NostrEvent } from "nostr-tools/pure";
-import type { Filter } from "nostr-tools/filter";
+import type { NostrEvent } from "../lib/nostr.js";
 import { IndexCache } from "../cache/index-cache.js";
 import { sortByDate } from "../utils.js";
 import { INDEXABLE_TAGS } from "./common.js";
 import type { NostrIDBDatabase } from "./schema.js";
+import type { Filter } from "../lib/nostr.js";
 
 /** Return all events for the given pubkeys */
 export function queryForPubkeys(
@@ -88,6 +88,79 @@ export function queryForTag(
 
   trans.commit();
   return Promise.all(promises).then(() => ids);
+}
+
+/** Return all events for the given indexable tag (AND logic - events must have ALL values) */
+export function queryForTagAnd(
+  db: NostrIDBDatabase,
+  tag: string,
+  values: string[],
+  indexCache?: IndexCache,
+): Promise<Set<string>> {
+  if (values.length === 0) return Promise.resolve(new Set());
+  if (values.length === 1) {
+    // Single value AND is same as OR
+    return queryForTag(db, tag, values, indexCache);
+  }
+
+  const loaded: string[] = [];
+  const valueSets: Set<string>[] = [];
+
+  // Load from indexCache
+  if (indexCache) {
+    for (const value of values) {
+      const cached = indexCache.getTagIndex(tag + value);
+      if (cached) {
+        valueSets.push(cached);
+        loaded.push(value);
+      }
+    }
+  }
+
+  // All indexes were loaded from indexCache — no DB round-trip needed
+  if (loaded.length === values.length) {
+    return Promise.resolve(intersectSets(valueSets));
+  }
+
+  // Load remaining indexes from db
+  const trans = db.transaction("events", "readonly");
+  const objectStore = trans.objectStore("events");
+  const index = objectStore.index("tags");
+
+  const handleResults = (value: string, result: string[]) => {
+    const s = new Set(result);
+    valueSets.push(s);
+    // add index to cache
+    if (indexCache) indexCache.setTagIndex(tag + value, s);
+  };
+
+  const promises = values
+    .filter((v) => !loaded.includes(v))
+    .map((v) => index.getAllKeys(tag + v).then((r) => handleResults(v, r)));
+
+  trans.commit();
+  return Promise.all(promises).then(() => intersectSets(valueSets));
+}
+
+/** Intersect an array of Sets, iterating from smallest to largest for efficiency */
+function intersectSets(sets: Set<string>[]): Set<string> {
+  if (sets.length === 0) return new Set<string>();
+
+  // Sort ascending by size so we iterate over the smallest set first
+  const sorted = sets.slice().sort((a, b) => a.size - b.size);
+
+  let intersection = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const next = sorted[i];
+    const newIntersection = new Set<string>();
+    for (const id of intersection) {
+      if (next.has(id)) newIntersection.add(id);
+    }
+    intersection = newIntersection;
+    // Short-circuit: empty intersection can never grow
+    if (intersection.size === 0) return intersection;
+  }
+  return intersection;
 }
 
 /** Return all events for the given kinds */
@@ -178,9 +251,29 @@ export async function getIdsForFilter(
   }
 
   for (const t of INDEXABLE_TAGS) {
-    const key = `#${t}`;
-    const values = filter[key as `#${string}`];
-    if (values?.length) and(await queryForTag(db, t, values, indexCache));
+    // Process &t filters first (AND logic) - they take precedence
+    const andKey = `&${t}`;
+    const andValues = filter[andKey as `&${string}`];
+
+    // Process #t filters (OR logic), but exclude values that are in &t
+    const orKey = `#${t}`;
+    const orValues = filter[orKey as `#${string}`];
+
+    if (andValues?.length) {
+      // Apply AND logic first
+      and(await queryForTagAnd(db, t, andValues, indexCache));
+    }
+
+    if (orValues?.length) {
+      // Filter out values that are in &t (they should be ignored in OR)
+      const filteredOrValues = andValues?.length
+        ? orValues.filter((v) => !andValues.includes(v))
+        : orValues;
+
+      if (filteredOrValues.length > 0) {
+        and(await queryForTag(db, t, filteredOrValues, indexCache));
+      }
+    }
   }
 
   if (filter.authors)

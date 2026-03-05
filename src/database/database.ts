@@ -5,7 +5,7 @@ import {
   IDBPTransaction,
   OpenDBCallbacks,
 } from "idb";
-import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
+import { isAddressableKind, isReplaceableKind } from "../lib/nostr.js";
 import { getEventUID } from "./common.js";
 import { NostrIDBDatabase, Schema } from "./schema.js";
 

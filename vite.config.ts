@@ -1,13 +1,18 @@
-import { svelte } from "@sveltejs/vite-plugin-svelte";
+import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import path from "path";
 
-// https://vitejs.dev/config/
 export default defineConfig({
   root: "examples",
-  base: "/nostr-idb",
-  plugins: [svelte()],
+  base: "/",
+  plugins: [react()],
+  resolve: {
+    alias: {
+      // allow examples to import from src/ without building first
+      "nostr-idb": path.resolve(__dirname, "src/index.ts"),
+    },
+  },
   build: {
-    outDir: "../public",
     target: "es2022",
   },
 });

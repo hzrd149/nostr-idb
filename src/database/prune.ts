@@ -1,4 +1,4 @@
-import { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 import { logger } from "../debug.js";
 import { countEvents } from "./query-misc.js";
 import { NostrIDBDatabase } from "./schema.js";
@@ -25,26 +25,35 @@ export async function pruneLastUsed(
 
   const used = (await db.getAll("used")).sort((a, b) => a.date - b.date);
 
-  const eventsTransaction = db.transaction("events", "readwrite");
-  const usedTransaction = db.transaction("used", "readwrite");
-
-  const promises: Promise<void>[] = [];
+  // Resolve which UIDs to delete before opening write transactions.
+  // Opening write transactions and then awaiting unrelated reads inside the
+  // loop causes IDB to auto-commit the write transactions prematurely.
+  const uidsToDelete: string[] = [];
   let i = diff;
-  while (i > 0) {
-    const entry = used.shift();
-    if (!entry) break;
+  for (const entry of used) {
+    if (i <= 0) break;
     const uid = entry.uid;
     if (skip) {
       const row = await db.get("events", uid);
       if (row && skip(row.event)) continue;
     }
+    uidsToDelete.push(uid);
+    i--;
+  }
+
+  if (uidsToDelete.length === 0) return;
+
+  const eventsTransaction = db.transaction("events", "readwrite");
+  const usedTransaction = db.transaction("used", "readwrite");
+
+  const promises: Promise<void>[] = [];
+  for (const uid of uidsToDelete) {
     promises.push(eventsTransaction.store.delete(uid));
     promises.push(usedTransaction.store.delete(uid));
-    i--;
   }
 
   eventsTransaction.commit();
   usedTransaction.commit();
   await Promise.all(promises);
-  log(`Removed ${diff} old events`);
+  log(`Removed ${uidsToDelete.length} old events`);
 }

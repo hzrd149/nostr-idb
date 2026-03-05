@@ -1,5 +1,5 @@
 import type { DBSchema, IDBPDatabase } from "idb";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 
 export type NostrIDBDatabase = IDBPDatabase<Schema>;
 

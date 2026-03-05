@@ -1,5 +1,5 @@
-import type { NostrEvent } from "nostr-tools/pure";
-import type { Filter } from "nostr-tools/filter";
+import type { NostrEvent } from "../lib/nostr.js";
+import type { Filter } from "../lib/nostr.js";
 import {
   Features,
   INostrIDB,

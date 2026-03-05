@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WriteQueue } from "../write-queue.js";
 import { openDB } from "../../database/database.js";
 import { getEventUID } from "../../database/common.js";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../../lib/nostr.js";
 import type { NostrIDBDatabase } from "../../database/schema.js";
 import { createTestEvent } from "../../__tests__/helpers.js";
 
@@ -135,6 +135,124 @@ describe("WriteQueue", () => {
       const matches = queue.matchPending([{ kinds: [1] }, { kinds: [2] }]);
 
       expect(matches).toHaveLength(2);
+    });
+
+    describe("NIP-91 &t filters", () => {
+      it("should match events with ALL &t tag values (AND logic)", () => {
+        const event1 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+          ],
+        });
+        const event2 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [["t", "meme"]], // missing "cat"
+        });
+        queue.addEvents([event1, event2]);
+
+        const matches = queue.matchPending([
+          { kinds: [1], "&t": ["meme", "cat"] },
+        ]);
+
+        expect(matches).toHaveLength(1);
+        expect(matches[0].id).toBe(event1.id);
+      });
+
+      it("should apply AND precedence over OR", () => {
+        const event1 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "black"],
+          ],
+        });
+        const event2 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "white"],
+          ],
+        });
+        const event3 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["t", "meme"],
+            ["t", "black"],
+          ], // missing "cat"
+        });
+        queue.addEvents([event1, event2, event3]);
+
+        const matches = queue.matchPending([
+          { kinds: [1], "&t": ["meme", "cat"], "#t": ["black", "white"] },
+        ]);
+
+        expect(matches).toHaveLength(2);
+        expect(matches.map((e) => e.id)).toContain(event1.id);
+        expect(matches.map((e) => e.id)).toContain(event2.id);
+        expect(matches.map((e) => e.id)).not.toContain(event3.id);
+      });
+
+      it("should ignore values in &t when processing #t", () => {
+        const event1 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+          ],
+        });
+        const event2 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "black"],
+          ],
+        });
+        queue.addEvents([event1, event2]);
+
+        const matches = queue.matchPending([
+          { kinds: [1], "&t": ["meme", "cat"], "#t": ["meme", "black"] },
+        ]);
+
+        // "meme" in #t should be ignored, so only event2 with "black" should match
+        expect(matches).toHaveLength(1);
+        expect(matches[0].id).toBe(event2.id);
+      });
+
+      it("should work with only &t filter (no #t)", () => {
+        const event1 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+          ],
+        });
+        const event2 = createTestEvent({
+          kind: 1,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [["t", "meme"]],
+        });
+        queue.addEvents([event1, event2]);
+
+        const matches = queue.matchPending([
+          { kinds: [1], "&t": ["meme", "cat"] },
+        ]);
+
+        expect(matches).toHaveLength(1);
+        expect(matches[0].id).toBe(event1.id);
+      });
     });
   });
 

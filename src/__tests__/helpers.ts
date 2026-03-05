@@ -3,7 +3,7 @@ import {
   generateSecretKey,
   getPublicKey,
 } from "nostr-tools/pure";
-import type { NostrEvent, EventTemplate } from "nostr-tools/pure";
+import type { NostrEvent, EventTemplate } from "../lib/nostr.js";
 
 const testSecretKey = generateSecretKey();
 const testPublicKey = getPublicKey(testSecretKey);
