@@ -15,41 +15,45 @@ Live Examples: https://hzrd149.github.io/nostr-idb/
 
 - Built directly on top of IndexedDB for the lowest latency
 - Caches indexes in memory
-- `NostrIDB` class with full nostr relay-like API
+- `NostrIDB` class with NIP-DB-compatible API (`query`, `count`, `subscribe` as AsyncGenerator)
+- NIP-91 AND-filter support (`&t` keys)
 
 ## NostrIDB Class
 
-The `NostrIDB` class is the main interface for working with nostr events in IndexedDB. It provides a complete nostr relay-like API with automatic batching, caching, and subscription management.
+The `NostrIDB` class is the main interface for working with nostr events in IndexedDB. It provides a NIP-DB-compatible API with automatic batching, caching, and subscription management.
 
 ### Basic Usage
 
 ```javascript
 import { NostrIDB, openDB } from "nostr-idb";
 
-// Create a new NostrIDB instance
+// Option 1: provide an existing IDB instance
 const db = await openDB("my-nostr-db");
 const nostrDB = new NostrIDB(db);
 
-// Start the database (starts background processes)
-await nostrDB.start();
+// Option 2: omit the db argument — opens the default "nostr-idb" database
+const nostrDB = new NostrIDB();
 
 // Add events
 await nostrDB.add(event1);
 await nostrDB.add(event2);
 
-// Query events
-const subscription = nostrDB.subscribe([{ kinds: [1], limit: 10 }], {
-  event: (event) => console.log("New event:", event),
-  complete: () => console.log("Subscription complete"),
-});
+// Query events (one-shot)
+const events = await nostrDB.query([{ kinds: [1], limit: 10 }]);
 
-// Get a specific event
+// Subscribe to events as an async generator
+for await (const event of nostrDB.subscribe([{ kinds: [1] }])) {
+  console.log("Event:", event);
+  // The generator ends after delivering all stored events
+}
+
+// Get a specific event by ID
 const event = await nostrDB.event("event-id");
 
 // Count events matching filters
 const count = await nostrDB.count([{ kinds: [1] }]);
 
-// Stop the database
+// Stop background processes (flush timers, prune interval)
 await nostrDB.stop();
 ```
 
@@ -69,7 +73,7 @@ const nostrDB = new NostrIDB(db, {
 
 #### `add(event: NostrEvent): Promise<boolean>`
 
-Add a single event to the database. Returns `true` if the event was added.
+Add a single event to the database. Returns `true` if the event was accepted. Ephemeral events are fanned out to active subscriptions but not persisted.
 
 #### `event(id: string): Promise<NostrEvent | undefined>`
 
@@ -79,17 +83,35 @@ Get a single event by its ID.
 
 Get the latest replaceable event for a given kind, author, and optional identifier.
 
-#### `count(filters: Filter[]): Promise<number>`
+#### `count(filters: Filter | Filter[]): Promise<number>`
 
-Count the number of events matching the given filters.
+Count the number of events matching the given filters. Accepts a single filter or an array.
 
-#### `subscribe(filters: Filter[], handlers: StreamHandlers): Subscription`
+#### `query(filters: Filter | Filter[]): Promise<NostrEvent[]>`
 
-Subscribe to events matching the filters. Returns a subscription object with a `close()` method.
+Query events matching the given filters and return them as an array. Accepts a single filter or an array.
 
-#### `filters(filters: Filter[]): Promise<NostrEvent[]>`
+#### `subscribe(filters: Filter | Filter[]): AsyncGenerator<NostrEvent, void, undefined>`
 
-Query events matching the given filters and return them as an array. This is a one-time query that returns all matching events.
+Subscribe to events matching the filters. Yields stored historical events first, then any new events added via `add()`. The generator ends once the subscription is closed (i.e. the caller breaks out of the `for await` loop or calls `.return()`).
+
+```javascript
+// Read all stored kind-1 events, then stop
+for await (const event of nostrDB.subscribe({ kinds: [1] })) {
+  console.log(event);
+}
+
+// Keep receiving live events until cancelled
+const gen = nostrDB.subscribe([{ kinds: [1] }]);
+for await (const event of gen) {
+  console.log("Live event:", event);
+  if (shouldStop) break; // cleans up the subscription
+}
+```
+
+#### `supports(): Promise<string[]>`
+
+Returns an array of supported feature strings. Currently returns `[]`. Feature strings follow the NIP-DB convention (e.g. `"search"` for NIP-50 full-text search).
 
 #### `deleteEvent(eventId: string): Promise<boolean>`
 
@@ -99,17 +121,21 @@ Delete a single event by its ID.
 
 Delete a replaceable event by pubkey, kind, and optional identifier.
 
-#### `deleteByFilters(filters: Filter[]): Promise<number>`
+#### `deleteByFilters(filters: Filter | Filter[]): Promise<number>`
 
-Delete all events matching the given filters. Returns the number of deleted events.
+Delete all events matching the given filters. Returns the number of deleted events. Accepts a single filter or an array.
 
 #### `deleteAllEvents(): Promise<void>`
 
 Delete all events from the database.
 
-#### `supports(): Promise<Features[]>`
+#### `start(): Promise<void>`
 
-Check which features the database supports.
+Start background write-flush and prune timers. Called automatically by the constructor — you only need this if you called `stop()` and want to resume.
+
+#### `stop(): Promise<void>`
+
+Stop background write-flush and prune timers.
 
 ### Advanced Usage
 
@@ -120,25 +146,16 @@ for (const event of events) {
   await nostrDB.add(event);
 }
 
-// Subscribe with error handling
-const subscription = nostrDB.subscribe([{ kinds: [1] }], {
-  event: (event) => {
-    console.log("Received event:", event);
-  },
-  error: (error) => {
-    console.error("Subscription error:", error);
-  },
-  complete: () => {
-    console.log("Subscription completed");
-  },
-});
+// Single-filter shorthand (no array required)
+const count = await nostrDB.count({ kinds: [1], authors: ["pubkey"] });
+const results = await nostrDB.query({ kinds: [1], limit: 50 });
 
-// Clean up subscription
-subscription.close();
+// NIP-91 AND-filter: events must have BOTH tag values
+const andResults = await nostrDB.query({ "&t": ["bitcoin", "nostr"] });
 
 // Query replaceable events
 const profile = await nostrDB.replaceable(0, "pubkey");
-const contactList = await nostrDB.replaceable(3, "pubkey", "contacts");
+const contactList = await nostrDB.replaceable(3, "pubkey");
 
 // Delete events by filters
 const deletedCount = await nostrDB.deleteByFilters([
@@ -153,9 +170,9 @@ NOTE: all methods are async unless specified otherwise
 
 ### openDB
 
-Opens a database with `name` and optional `callbacks`. see [openDB](https://www.npmjs.com/package/idb#opendb)
+Opens a database with `name` and optional `callbacks`. See [openDB](https://www.npmjs.com/package/idb#opendb)
 
-If no name is provided it will default to `nostr-idb`
+If no name is provided it will default to `nostr-idb`.
 
 ```javascript
 import { openDB, NostrIDB } from "nostr-idb";
@@ -165,7 +182,6 @@ const db = await openDB("nostr-idb");
 
 // Create a NostrIDB instance
 const nostrDB = new NostrIDB(db);
-await nostrDB.start();
 
 // Use the NostrIDB instance
 await nostrDB.add(event);
@@ -173,78 +189,23 @@ await nostrDB.add(event);
 
 ### clearDB
 
-Remove all events from the database without deleting it
+Remove all events from the database without deleting it.
 
 ### deleteDB
 
-Calls `deleteDB` from `idb`. see [deleteDB](https://www.npmjs.com/package/idb#deletedb)
+Calls `deleteDB` from `idb`. See [deleteDB](https://www.npmjs.com/package/idb#deletedb)
 
-### getEventsForFilter / getEventsForFilters
+### pruneLastUsed
 
-Returns a sorted array of events that match the filter/filters
+Removes the least recently used events until the database is at or below a size limit.
 
-```javascript
-import { openDB, NostrIDB } from "nostr-idb";
-
-const db = await openDB("events");
-const nostrDB = new NostrIDB(db);
-await nostrDB.start();
-
-// add events to db
-await nostrDB.add(event1);
-await nostrDB.add(event2);
-
-// query db using subscription
-const subscription = nostrDB.subscribe(
-  [
-    {
-      kinds: [1, 6],
-      limit: 30,
-    },
-  ],
-  {
-    event: (event) => console.log("Found event:", event),
-    complete: () => console.log("Query complete"),
-  },
-);
-```
-
-### countEventsForFilter / countEventsForFilters
-
-Similar to `getEventsForFilters` but returns just the number of events
+The `NostrIDB` class automatically handles pruning based on the `maxEvents` option. You can also prune manually:
 
 ```javascript
-import { openDB, NostrIDB } from "nostr-idb";
+import { openDB, pruneLastUsed } from "nostr-idb";
 
-const db = await openDB("events");
-const nostrDB = new NostrIDB(db);
-await nostrDB.start();
+const db = await openDB("nostr-idb");
 
-// count events matching filters
-const count = await nostrDB.count([
-  {
-    kinds: [1, 6],
-    limit: 30,
-  },
-]);
-console.log(`Found ${count} events`);
-```
-
-### addEvent / addEvents
-
-Add events to the database
-
-The `NostrIDB` class automatically batches events for better performance. Use `nostrDB.add(event)` for individual events.
-
-### pruneDatabaseToSize(db, limit)
-
-Removes the least used events until the database is under the size limit
-
-The `NostrIDB` class automatically handles pruning based on the `maxEvents` option. You can also manually prune:
-
-```javascript
-import { pruneLastUsed } from "nostr-idb";
-
-// Manually prune to keep only 1000 events
+// Keep only the 1000 most recently used events
 await pruneLastUsed(db, 1000);
 ```
