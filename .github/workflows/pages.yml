@@ -48,7 +48,7 @@ jobs:
         run: pnpm build
 
       - name: Build Examples
-        run: pnpm vite build --base=/nostr-idb/ && cp examples/index.html public/index.html
+        run: pnpm build:examples
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -56,7 +56,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "./public"
+          path: "./examples/dist"
 
       - name: Deploy to GitHub Pages
         id: deployment

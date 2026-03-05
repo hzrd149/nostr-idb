@@ -29,7 +29,7 @@
     "dev": "vite serve",
     "prebuild": "rm -rf dist",
     "build": "tsc",
-    "build:examples": "vite build && cp examples/index.html public/index.html",
+    "build:examples": "vite build",
     "format": "prettier -w .",
     "test": "vitest",
     "test:ui": "vitest --ui",
