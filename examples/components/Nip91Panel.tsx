@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import type { NostrEvent } from "nostr-tools/pure";
 import type { DBState } from "../hooks/useNostrIDB.ts";
 import { getEventsForFilter, getIdsForFilter } from "../../src/index.ts";
-import type { Filter } from "../../src/types.ts";
+import type { Filter } from "../../src/lib/nostr.js";
 
 type TagEntry = { tag: string; value: string };
 

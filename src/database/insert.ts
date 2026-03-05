@@ -1,5 +1,9 @@
-import { type NostrEvent, validateEvent } from "nostr-tools/pure";
-import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
+import {
+  type NostrEvent,
+  validateEvent,
+  isAddressableKind,
+  isReplaceableKind,
+} from "../lib/nostr.js";
 import { getEventTags, getEventUID } from "./common.js";
 import type { NostrIDBDatabase } from "./schema.js";
 

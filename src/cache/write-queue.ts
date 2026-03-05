@@ -1,8 +1,8 @@
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 import { addEvents, updateUsed, getEventUID } from "../database/index.js";
 import { NostrIDBDatabase } from "../database/schema.js";
 import { logger } from "../debug.js";
-import type { Filter } from "../types.js";
+import type { Filter } from "../lib/nostr.js";
 import { matchFilters } from "../lib/nostr.js";
 
 const log = logger.extend("WriteQueue");

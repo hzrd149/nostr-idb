@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import type { NostrEvent } from "nostr-tools/pure";
 import type { DBState } from "../hooks/useNostrIDB.ts";
 import { getEventsForFilter } from "../../src/index.ts";
-import type { Filter } from "../../src/types.ts";
+import type { Filter } from "../../src/lib/nostr.js";
 
 const DEFAULT_FILTER = JSON.stringify({ kinds: [1], limit: 50 }, null, 2);
 

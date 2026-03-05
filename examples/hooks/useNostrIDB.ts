@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../../src/lib/nostr.js";
 import { IndexCache, NostrIDB, openDB } from "../../src/index.ts";
 import type { NostrIDBDatabase } from "../../src/database/schema.ts";
 

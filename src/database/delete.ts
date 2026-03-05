@@ -1,6 +1,6 @@
-import type { NostrEvent } from "nostr-tools/pure";
-import type { Filter } from "nostr-tools/filter";
-import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
+import type { NostrEvent } from "../lib/nostr.js";
+import { isAddressableKind, isReplaceableKind } from "../lib/nostr.js";
+import type { Filter } from "../lib/nostr.js";
 import { IndexCache } from "../cache/index-cache.js";
 import { getIdsForFilter, getIdsForFilters } from "./query-filter.js";
 import type { NostrIDBDatabase } from "./schema.js";

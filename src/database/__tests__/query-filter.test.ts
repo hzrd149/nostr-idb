@@ -11,7 +11,7 @@ import {
 import { addEvents } from "../insert.js";
 import { openDB } from "../database.js";
 import { IndexCache } from "../../cache/index-cache.js";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../../lib/nostr.js";
 import type { NostrIDBDatabase } from "../schema.js";
 import { createTestEvent, getTestPublicKey } from "../../__tests__/helpers.js";
 
@@ -175,10 +175,17 @@ describe("Query Filter", () => {
   describe("queryForTagAnd (NIP-91)", () => {
     it("should return event IDs that have ALL tag values (AND logic)", async () => {
       const events = [
-        createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+        createEvent(1, 1000, [
+          ["t", "meme"],
+          ["t", "cat"],
+        ]),
         createEvent(1, 2000, [["t", "meme"]]), // missing "cat"
         createEvent(1, 3000, [["t", "cat"]]), // missing "meme"
-        createEvent(1, 4000, [["t", "meme"], ["t", "cat"], ["t", "dog"]]), // has both
+        createEvent(1, 4000, [
+          ["t", "meme"],
+          ["t", "cat"],
+          ["t", "dog"],
+        ]), // has both
       ];
       await addEvents(db, events);
 
@@ -218,7 +225,10 @@ describe("Query Filter", () => {
 
     it("should use index cache when available", async () => {
       const events = [
-        createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+        createEvent(1, 1000, [
+          ["t", "meme"],
+          ["t", "cat"],
+        ]),
       ];
       await addEvents(db, events);
 
@@ -365,7 +375,10 @@ describe("Query Filter", () => {
     describe("NIP-91 &t filters (AND logic)", () => {
       it("should filter by &t with AND logic", async () => {
         const events = [
-          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+          createEvent(1, 1000, [
+            ["t", "meme"],
+            ["t", "cat"],
+          ]),
           createEvent(1, 2000, [["t", "meme"]]), // missing "cat"
           createEvent(1, 3000, [["t", "cat"]]), // missing "meme"
         ];
@@ -384,10 +397,24 @@ describe("Query Filter", () => {
 
       it("should apply AND precedence over OR", async () => {
         const events = [
-          createEvent(1, 1000, [["t", "meme"], ["t", "cat"], ["t", "black"]]),
-          createEvent(1, 2000, [["t", "meme"], ["t", "cat"], ["t", "white"]]),
-          createEvent(1, 3000, [["t", "meme"], ["t", "black"]]), // missing "cat"
-          createEvent(1, 4000, [["t", "cat"], ["t", "white"]]), // missing "meme"
+          createEvent(1, 1000, [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "black"],
+          ]),
+          createEvent(1, 2000, [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "white"],
+          ]),
+          createEvent(1, 3000, [
+            ["t", "meme"],
+            ["t", "black"],
+          ]), // missing "cat"
+          createEvent(1, 4000, [
+            ["t", "cat"],
+            ["t", "white"],
+          ]), // missing "meme"
         ];
         await addEvents(db, events);
 
@@ -407,9 +434,19 @@ describe("Query Filter", () => {
 
       it("should ignore values in &t when processing #t", async () => {
         const events = [
-          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
-          createEvent(1, 2000, [["t", "meme"], ["t", "cat"], ["t", "black"]]),
-          createEvent(1, 3000, [["t", "meme"], ["t", "black"]]), // missing "cat"
+          createEvent(1, 1000, [
+            ["t", "meme"],
+            ["t", "cat"],
+          ]),
+          createEvent(1, 2000, [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "black"],
+          ]),
+          createEvent(1, 3000, [
+            ["t", "meme"],
+            ["t", "black"],
+          ]), // missing "cat"
         ];
         await addEvents(db, events);
 
@@ -428,7 +465,10 @@ describe("Query Filter", () => {
 
       it("should work with only &t filter (no #t)", async () => {
         const events = [
-          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+          createEvent(1, 1000, [
+            ["t", "meme"],
+            ["t", "cat"],
+          ]),
           createEvent(1, 2000, [["t", "meme"]]),
         ];
         await addEvents(db, events);
@@ -462,9 +502,18 @@ describe("Query Filter", () => {
 
       it("should combine &t with other filters", async () => {
         const events = [
-          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
-          createEvent(2, 2000, [["t", "meme"], ["t", "cat"]]), // wrong kind
-          createEvent(1, 3000, [["t", "meme"], ["t", "cat"]]),
+          createEvent(1, 1000, [
+            ["t", "meme"],
+            ["t", "cat"],
+          ]),
+          createEvent(2, 2000, [
+            ["t", "meme"],
+            ["t", "cat"],
+          ]), // wrong kind
+          createEvent(1, 3000, [
+            ["t", "meme"],
+            ["t", "cat"],
+          ]),
         ];
         await addEvents(db, events);
 

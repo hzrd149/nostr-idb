@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../../src/lib/nostr.js";
 
 export type RelayStatus = "disconnected" | "connecting" | "connected" | "error";
 

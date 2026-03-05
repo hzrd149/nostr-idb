@@ -1,5 +1,5 @@
-import type { NostrEvent } from "nostr-tools/pure";
-import type { Filter } from "../types.js";
+import type { NostrEvent } from "../lib/nostr.js";
+import type { Filter } from "../lib/nostr.js";
 
 /** Generic type for a subscription */
 export type Subscription = {

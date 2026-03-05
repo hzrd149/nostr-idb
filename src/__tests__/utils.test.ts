@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { sortByDate } from "../utils.js";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 
 describe("sortByDate", () => {
   const createEvent = (id: string, created_at: number): NostrEvent => ({

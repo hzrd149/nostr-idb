@@ -13,7 +13,7 @@ Agent coding guide for the `nostr-idb` repository. Read this before writing or m
 - A high-level `NostrIDB` class (`src/nostrdb/`)
 - Worker and SharedWorker proxies (`src/worker/`)
 
-**Package manager:** `pnpm` (authoritative — use `pnpm`, not `npm` or `yarn`).  
+**Package manager:** `pnpm` (authoritative — use `pnpm`, not `npm` or `yarn`).
 **Node version:** 20 (`.nvmrc`); CI runs Node 24.
 
 ---
@@ -87,7 +87,7 @@ import { NostrEvent } from "nostr-tools"; // ✗
 Use `import type` for type-only imports; use inline `type` keyword when mixing values and types:
 
 ```typescript
-import type { Filter } from "../types.js";
+import type { Filter } from "../lib/nostr.js";
 import { type NostrEvent, validateEvent } from "nostr-tools/pure";
 ```
 
@@ -150,7 +150,7 @@ export type Filter = {
 };
 ```
 
-Import this `Filter` from `"../types.js"` (not from `nostr-tools`) whenever NIP-91 `&t` support is needed.
+Import this `Filter` from `"../lib/nostr.js"` (not from `nostr-tools`) whenever NIP-91 `&t` support is needed.
 
 ### Patterns in use
 
@@ -237,7 +237,7 @@ const db = await openDatabase("test-my-module-" + Date.now());
 ## Common Pitfalls
 
 1. **Forgetting `.js` on relative imports** — the build will fail with a module-not-found error at runtime even though `tsc` succeeds with `skipLibCheck`.
-2. **Importing `Filter` from `nostr-tools/filter`** instead of `../types.js` — loses NIP-91 `&t` support.
+2. **Importing `Filter` from `nostr-tools/filter`** instead of `../lib/nostr.js` — loses NIP-91 `&t` support.
 3. **Using `const enum`** — breaks `isolatedModules`. Use a regular `enum` or a union of string literals.
 4. **Putting logic in barrel files** — barrels are re-export-only; implementation belongs in named modules.
 5. **Not using `import type`** for type-only imports — required for `isolatedModules` correctness.

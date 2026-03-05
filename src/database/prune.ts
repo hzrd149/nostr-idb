@@ -1,4 +1,4 @@
-import { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 import { logger } from "../debug.js";
 import { countEvents } from "./query-misc.js";
 import { NostrIDBDatabase } from "./schema.js";

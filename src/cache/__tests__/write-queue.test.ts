@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WriteQueue } from "../write-queue.js";
 import { openDB } from "../../database/database.js";
 import { getEventUID } from "../../database/common.js";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../../lib/nostr.js";
 import type { NostrIDBDatabase } from "../../database/schema.js";
 import { createTestEvent } from "../../__tests__/helpers.js";
 
@@ -142,7 +142,10 @@ describe("WriteQueue", () => {
         const event1 = createTestEvent({
           kind: 1,
           created_at: Math.floor(Date.now() / 1000),
-          tags: [["t", "meme"], ["t", "cat"]],
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+          ],
         });
         const event2 = createTestEvent({
           kind: 1,
@@ -151,7 +154,9 @@ describe("WriteQueue", () => {
         });
         queue.addEvents([event1, event2]);
 
-        const matches = queue.matchPending([{ kinds: [1], "&t": ["meme", "cat"] }]);
+        const matches = queue.matchPending([
+          { kinds: [1], "&t": ["meme", "cat"] },
+        ]);
 
         expect(matches).toHaveLength(1);
         expect(matches[0].id).toBe(event1.id);
@@ -161,17 +166,28 @@ describe("WriteQueue", () => {
         const event1 = createTestEvent({
           kind: 1,
           created_at: Math.floor(Date.now() / 1000),
-          tags: [["t", "meme"], ["t", "cat"], ["t", "black"]],
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "black"],
+          ],
         });
         const event2 = createTestEvent({
           kind: 1,
           created_at: Math.floor(Date.now() / 1000),
-          tags: [["t", "meme"], ["t", "cat"], ["t", "white"]],
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "white"],
+          ],
         });
         const event3 = createTestEvent({
           kind: 1,
           created_at: Math.floor(Date.now() / 1000),
-          tags: [["t", "meme"], ["t", "black"]], // missing "cat"
+          tags: [
+            ["t", "meme"],
+            ["t", "black"],
+          ], // missing "cat"
         });
         queue.addEvents([event1, event2, event3]);
 
@@ -189,12 +205,19 @@ describe("WriteQueue", () => {
         const event1 = createTestEvent({
           kind: 1,
           created_at: Math.floor(Date.now() / 1000),
-          tags: [["t", "meme"], ["t", "cat"]],
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+          ],
         });
         const event2 = createTestEvent({
           kind: 1,
           created_at: Math.floor(Date.now() / 1000),
-          tags: [["t", "meme"], ["t", "cat"], ["t", "black"]],
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+            ["t", "black"],
+          ],
         });
         queue.addEvents([event1, event2]);
 
@@ -211,7 +234,10 @@ describe("WriteQueue", () => {
         const event1 = createTestEvent({
           kind: 1,
           created_at: Math.floor(Date.now() / 1000),
-          tags: [["t", "meme"], ["t", "cat"]],
+          tags: [
+            ["t", "meme"],
+            ["t", "cat"],
+          ],
         });
         const event2 = createTestEvent({
           kind: 1,
@@ -220,7 +246,9 @@ describe("WriteQueue", () => {
         });
         queue.addEvents([event1, event2]);
 
-        const matches = queue.matchPending([{ kinds: [1], "&t": ["meme", "cat"] }]);
+        const matches = queue.matchPending([
+          { kinds: [1], "&t": ["meme", "cat"] },
+        ]);
 
         expect(matches).toHaveLength(1);
         expect(matches[0].id).toBe(event1.id);

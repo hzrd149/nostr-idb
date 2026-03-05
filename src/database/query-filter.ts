@@ -1,9 +1,9 @@
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../lib/nostr.js";
 import { IndexCache } from "../cache/index-cache.js";
 import { sortByDate } from "../utils.js";
 import { INDEXABLE_TAGS } from "./common.js";
 import type { NostrIDBDatabase } from "./schema.js";
-import type { Filter } from "../types.js";
+import type { Filter } from "../lib/nostr.js";
 
 /** Return all events for the given pubkeys */
 export function queryForPubkeys(

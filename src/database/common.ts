@@ -1,5 +1,5 @@
-import { type NostrEvent } from "nostr-tools/pure";
-import { isAddressableKind, isReplaceableKind } from "nostr-tools/kinds";
+import type { NostrEvent } from "../lib/nostr.js";
+import { isAddressableKind, isReplaceableKind } from "../lib/nostr.js";
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz";
 
@@ -22,7 +22,7 @@ export function getEventTags(event: NostrEvent): string[] {
 /** Returns the events Unique ID */
 export function getEventUID(event: NostrEvent): string {
   if (Reflect.has(event, EventUIDSymbol))
-    return Reflect.get(event, EventUIDSymbol);
+    return Reflect.get(event, EventUIDSymbol) as string;
 
   let uid: string;
   if (isReplaceableKind(event.kind) || isAddressableKind(event.kind)) {

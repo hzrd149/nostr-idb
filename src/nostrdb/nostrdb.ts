@@ -1,7 +1,7 @@
-import type { NostrEvent } from "nostr-tools/pure";
-import { matchFilters } from "nostr-tools/filter";
-import type { Filter } from "../types.js";
-import { isEphemeralKind } from "nostr-tools/kinds";
+import type { NostrEvent } from "../lib/nostr.js";
+import { isEphemeralKind } from "../lib/nostr.js";
+import { matchFilters } from "../lib/nostr.js";
+import type { Filter } from "../lib/nostr.js";
 
 import { IndexCache } from "../cache/index-cache.js";
 import { WriteQueue } from "../cache/write-queue.js";

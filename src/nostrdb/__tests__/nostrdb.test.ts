@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { NostrIDB } from "../nostrdb.js";
 import { openDB } from "../../database/database.js";
 import { getEventUID } from "../../database/common.js";
-import type { NostrEvent } from "nostr-tools/pure";
+import type { NostrEvent } from "../../lib/nostr.js";
 import type { NostrIDBDatabase } from "../../database/schema.js";
 import { createTestEvent, getTestPublicKey } from "../../__tests__/helpers.js";
 
