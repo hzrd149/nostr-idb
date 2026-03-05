@@ -1,5 +1,12 @@
 # nostr-idb
 
+## 5.0.0
+
+### Major Changes
+
+- 7455b1c: Update NostrIDB to match latest NIP-DB interface
+- 7455b1c: Remove worker exports
+
 ## 4.1.0
 
 ### Minor Changes
