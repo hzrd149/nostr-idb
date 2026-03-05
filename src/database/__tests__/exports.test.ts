@@ -36,6 +36,7 @@ describe("exports", () => {
         "queryForKinds",
         "queryForPubkeys",
         "queryForTag",
+        "queryForTagAnd",
         "queryForTime",
         "updateUsed",
       ]

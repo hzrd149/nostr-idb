@@ -48,7 +48,7 @@ jobs:
         run: pnpm build
 
       - name: Build Examples
-        run: pnpm build:examples
+        run: pnpm vite build --base=/nostr-idb/ && cp examples/index.html public/index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

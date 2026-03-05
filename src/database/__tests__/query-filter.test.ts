@@ -6,6 +6,7 @@ import {
   queryForPubkeys,
   queryForKinds,
   queryForTag,
+  queryForTagAnd,
 } from "../query-filter.js";
 import { addEvents } from "../insert.js";
 import { openDB } from "../database.js";
@@ -171,6 +172,65 @@ describe("Query Filter", () => {
     });
   });
 
+  describe("queryForTagAnd (NIP-91)", () => {
+    it("should return event IDs that have ALL tag values (AND logic)", async () => {
+      const events = [
+        createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+        createEvent(1, 2000, [["t", "meme"]]), // missing "cat"
+        createEvent(1, 3000, [["t", "cat"]]), // missing "meme"
+        createEvent(1, 4000, [["t", "meme"], ["t", "cat"], ["t", "dog"]]), // has both
+      ];
+      await addEvents(db, events);
+
+      const ids = await queryForTagAnd(db, "t", ["meme", "cat"]);
+
+      expect(ids.size).toBe(2);
+      expect(ids.has(events[0].id)).toBe(true);
+      expect(ids.has(events[3].id)).toBe(true);
+      expect(ids.has(events[1].id)).toBe(false);
+      expect(ids.has(events[2].id)).toBe(false);
+    });
+
+    it("should return empty set when no events have all values", async () => {
+      const events = [
+        createEvent(1, 1000, [["t", "meme"]]),
+        createEvent(1, 2000, [["t", "cat"]]),
+      ];
+      await addEvents(db, events);
+
+      const ids = await queryForTagAnd(db, "t", ["meme", "cat", "dog"]);
+
+      expect(ids.size).toBe(0);
+    });
+
+    it("should handle single value (same as OR)", async () => {
+      const events = [
+        createEvent(1, 1000, [["t", "meme"]]),
+        createEvent(1, 2000, [["t", "cat"]]),
+      ];
+      await addEvents(db, events);
+
+      const ids = await queryForTagAnd(db, "t", ["meme"]);
+
+      expect(ids.size).toBe(1);
+      expect(ids.has(events[0].id)).toBe(true);
+    });
+
+    it("should use index cache when available", async () => {
+      const events = [
+        createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+      ];
+      await addEvents(db, events);
+
+      await queryForTagAnd(db, "t", ["meme", "cat"], indexCache);
+      const ids = await queryForTagAnd(db, "t", ["meme", "cat"], indexCache);
+
+      expect(ids.size).toBe(1);
+      expect(indexCache.getTagIndex("tmeme")).toBeDefined();
+      expect(indexCache.getTagIndex("tcat")).toBeDefined();
+    });
+  });
+
   describe("getIdsForFilter", () => {
     it("should filter by ids", async () => {
       const events = [
@@ -300,6 +360,124 @@ describe("Query Filter", () => {
     it("should return empty set for search filters", async () => {
       const ids = await getIdsForFilter(db, { search: "test" });
       expect(ids.size).toBe(0);
+    });
+
+    describe("NIP-91 &t filters (AND logic)", () => {
+      it("should filter by &t with AND logic", async () => {
+        const events = [
+          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+          createEvent(1, 2000, [["t", "meme"]]), // missing "cat"
+          createEvent(1, 3000, [["t", "cat"]]), // missing "meme"
+        ];
+        await addEvents(db, events);
+
+        const ids = await getIdsForFilter(db, {
+          kinds: [1],
+          "&t": ["meme", "cat"],
+        });
+
+        expect(ids.size).toBe(1);
+        expect(ids.has(events[0].id)).toBe(true);
+        expect(ids.has(events[1].id)).toBe(false);
+        expect(ids.has(events[2].id)).toBe(false);
+      });
+
+      it("should apply AND precedence over OR", async () => {
+        const events = [
+          createEvent(1, 1000, [["t", "meme"], ["t", "cat"], ["t", "black"]]),
+          createEvent(1, 2000, [["t", "meme"], ["t", "cat"], ["t", "white"]]),
+          createEvent(1, 3000, [["t", "meme"], ["t", "black"]]), // missing "cat"
+          createEvent(1, 4000, [["t", "cat"], ["t", "white"]]), // missing "meme"
+        ];
+        await addEvents(db, events);
+
+        const ids = await getIdsForFilter(db, {
+          kinds: [1],
+          "&t": ["meme", "cat"],
+          "#t": ["black", "white"],
+        });
+
+        // Should return events with both "meme" AND "cat" that also have "black" OR "white"
+        expect(ids.size).toBe(2);
+        expect(ids.has(events[0].id)).toBe(true); // has meme, cat, black
+        expect(ids.has(events[1].id)).toBe(true); // has meme, cat, white
+        expect(ids.has(events[2].id)).toBe(false); // missing cat
+        expect(ids.has(events[3].id)).toBe(false); // missing meme
+      });
+
+      it("should ignore values in &t when processing #t", async () => {
+        const events = [
+          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+          createEvent(1, 2000, [["t", "meme"], ["t", "cat"], ["t", "black"]]),
+          createEvent(1, 3000, [["t", "meme"], ["t", "black"]]), // missing "cat"
+        ];
+        await addEvents(db, events);
+
+        const ids = await getIdsForFilter(db, {
+          kinds: [1],
+          "&t": ["meme", "cat"],
+          "#t": ["meme", "black"], // "meme" should be ignored since it's in &t
+        });
+
+        // Should match events with both "meme" AND "cat" that also have "black" (but "meme" in #t is ignored)
+        expect(ids.size).toBe(1);
+        expect(ids.has(events[1].id)).toBe(true); // has meme, cat, black
+        expect(ids.has(events[0].id)).toBe(false); // missing "black"
+        expect(ids.has(events[2].id)).toBe(false); // missing "cat"
+      });
+
+      it("should work with only &t filter (no #t)", async () => {
+        const events = [
+          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+          createEvent(1, 2000, [["t", "meme"]]),
+        ];
+        await addEvents(db, events);
+
+        const ids = await getIdsForFilter(db, {
+          kinds: [1],
+          "&t": ["meme", "cat"],
+        });
+
+        expect(ids.size).toBe(1);
+        expect(ids.has(events[0].id)).toBe(true);
+        expect(ids.has(events[1].id)).toBe(false);
+      });
+
+      it("should work with only #t filter (no &t)", async () => {
+        const events = [
+          createEvent(1, 1000, [["t", "meme"]]),
+          createEvent(1, 2000, [["t", "cat"]]),
+        ];
+        await addEvents(db, events);
+
+        const ids = await getIdsForFilter(db, {
+          kinds: [1],
+          "#t": ["meme", "cat"],
+        });
+
+        expect(ids.size).toBe(2);
+        expect(ids.has(events[0].id)).toBe(true);
+        expect(ids.has(events[1].id)).toBe(true);
+      });
+
+      it("should combine &t with other filters", async () => {
+        const events = [
+          createEvent(1, 1000, [["t", "meme"], ["t", "cat"]]),
+          createEvent(2, 2000, [["t", "meme"], ["t", "cat"]]), // wrong kind
+          createEvent(1, 3000, [["t", "meme"], ["t", "cat"]]),
+        ];
+        await addEvents(db, events);
+
+        const ids = await getIdsForFilter(db, {
+          kinds: [1],
+          "&t": ["meme", "cat"],
+        });
+
+        expect(ids.size).toBe(2);
+        expect(ids.has(events[0].id)).toBe(true);
+        expect(ids.has(events[2].id)).toBe(true);
+        expect(ids.has(events[1].id)).toBe(false);
+      });
     });
   });
 
