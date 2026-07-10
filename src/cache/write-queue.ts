@@ -1,4 +1,4 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import { addEvents, updateUsed, getEventUID } from "../database/index.js";
 import { NostrIDBDatabase } from "../database/schema.js";
 import { logger } from "../debug.js";
@@ -8,35 +8,35 @@ import { matchFilters } from "../lib/nostr.js";
 const log = logger.extend("WriteQueue");
 
 /** A queue of events to be written to the database */
-export class WriteQueue {
+export class WriteQueue<TEvent extends StoredEvent = StoredEvent> {
   db: NostrIDBDatabase;
   private queuedIds = new Set<string>();
-  private eventQueue: NostrEvent[] = [];
+  private eventQueue: TEvent[] = [];
   private lastUsedQueue = new Set<string>();
 
   /** Called for each chunk of events before they are written to the database */
-  processEvents:
-    | ((events: NostrEvent[]) => Promise<NostrEvent[] | void>)
-    | null = null;
+  processEvents: ((events: TEvent[]) => Promise<TEvent[] | void>) | null = null;
 
   constructor(db: NostrIDBDatabase) {
     this.db = db;
   }
 
-  addEvent(event: NostrEvent) {
-    if (this.queuedIds.has(event.id)) return;
+  addEvent(event: TEvent) {
+    const uid = getEventUID(event);
+    if (this.queuedIds.has(uid)) return;
     this.eventQueue.push(event);
-    this.queuedIds.add(event.id);
+    this.queuedIds.add(uid);
     this.touch(event);
   }
-  addEvents(events: NostrEvent[]) {
-    const arr = events.filter((e) => !this.queuedIds.has(e.id));
+  addEvents(events: TEvent[]) {
+    const arr = events.filter((e) => !this.queuedIds.has(getEventUID(e)));
     if (arr.length === 0) return;
     this.eventQueue.push(...arr);
+    for (const event of arr) this.queuedIds.add(getEventUID(event));
     this.touch(arr);
   }
 
-  touch(event: NostrEvent | NostrEvent[]) {
+  touch(event: TEvent | TEvent[]) {
     if (Array.isArray(event)) {
       for (const e of event) this.lastUsedQueue.add(getEventUID(e));
     } else {
@@ -51,12 +51,12 @@ export class WriteQueue {
   /** Write all events in the queue to the database */
   async flush(count = 1000) {
     if (this.eventQueue.length > 0) {
-      let events: NostrEvent[] = [];
+      let events: TEvent[] = [];
       for (let i = 0; i < count; i++) {
         const event = this.eventQueue.shift();
         if (!event) break;
         events.push(event);
-        this.queuedIds.delete(event.id);
+        this.queuedIds.delete(getEventUID(event));
       }
 
       if (this.processEvents) {

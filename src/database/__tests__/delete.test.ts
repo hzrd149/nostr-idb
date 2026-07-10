@@ -156,15 +156,13 @@ describe("delete", () => {
       const e2 = createTestEvent({ kind: 30023, tags: [["d", "article-2"]] });
       await addEvents(db, [e1, e2]);
 
-      // IndexCache.removeEvent uses event.id (the hash), not the UID.
-      // Seed the pubkey index with the event hashes so removeEvent can find them.
-      cache.setPubkeyIndex(pubkey, new Set([e1.id, e2.id]));
+      // IndexCache stores database UIDs so replaceable events can be removed by key.
+      cache.setPubkeyIndex(pubkey, new Set([getEventUID(e1), getEventUID(e2)]));
 
       await deleteAllReplaceable(db, pubkey, 30023, cache);
 
-      // Both event hashes should be removed from the pubkey index
-      expect(cache.getPubkeyIndex(pubkey)?.has(e1.id)).toBe(false);
-      expect(cache.getPubkeyIndex(pubkey)?.has(e2.id)).toBe(false);
+      expect(cache.getPubkeyIndex(pubkey)?.has(getEventUID(e1))).toBe(false);
+      expect(cache.getPubkeyIndex(pubkey)?.has(getEventUID(e2))).toBe(false);
     });
   });
 

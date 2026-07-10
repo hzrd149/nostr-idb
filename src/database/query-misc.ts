@@ -1,15 +1,15 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import { NostrIDBDatabase } from "./schema.js";
 
 /** Returns the events from the given address pointers */
 export async function getReplaceableEvents(
   db: NostrIDBDatabase,
   pointers: { kind: number; pubkey: string; identifier?: string }[],
-): Promise<NostrEvent[]> {
+): Promise<StoredEvent[]> {
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
 
-  const events: Record<string, NostrEvent> = {};
+  const events: Record<string, StoredEvent> = {};
   const promises = pointers.map(async (pointer) => {
     const key = [pointer.kind, pointer.pubkey, pointer.identifier ?? ""].join(
       ":",

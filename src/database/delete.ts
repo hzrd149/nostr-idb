@@ -1,4 +1,4 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import { isAddressableKind, isReplaceableKind } from "../lib/nostr.js";
 import type { Filter } from "../lib/nostr.js";
 import { IndexCache } from "../cache/index-cache.js";
@@ -96,7 +96,7 @@ export async function deleteAllReplaceable(
   const matchingEvents = pubkeyEvents.filter((id) => kindEvents.includes(id));
 
   let deletedCount = 0;
-  const eventsToDelete: { event: NostrEvent; uid: string }[] = [];
+  const eventsToDelete: { event: StoredEvent; uid: string }[] = [];
 
   // Collect events to delete and their data for cache update
   for (const uid of matchingEvents) {
@@ -170,7 +170,7 @@ export async function deleteEventsByIds(
   const objectStore = transaction.objectStore("events");
 
   let deletedCount = 0;
-  const eventsToDelete: NostrEvent[] = [];
+  const eventsToDelete: StoredEvent[] = [];
 
   // Collect events to delete and their data for cache update
   for (const eventId of eventIds) {

@@ -1,4 +1,4 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import { isAddressableKind, isReplaceableKind } from "../lib/nostr.js";
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz";
@@ -10,7 +10,7 @@ export const INDEXABLE_TAGS = (LETTERS + LETTERS.toUpperCase()).split("");
 export const EventUIDSymbol = Symbol.for("event-uid");
 
 /** Returns an events tags as an array of string for indexing */
-export function getEventTags(event: NostrEvent): string[] {
+export function getEventTags(event: StoredEvent): string[] {
   return event.tags
     .filter(
       (t) =>
@@ -20,7 +20,7 @@ export function getEventTags(event: NostrEvent): string[] {
 }
 
 /** Returns the events Unique ID */
-export function getEventUID(event: NostrEvent): string {
+export function getEventUID(event: StoredEvent): string {
   if (Reflect.has(event, EventUIDSymbol))
     return Reflect.get(event, EventUIDSymbol) as string;
 

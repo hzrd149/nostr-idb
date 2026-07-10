@@ -1,4 +1,4 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import { IndexCache } from "../cache/index-cache.js";
 import { sortByDate } from "../utils.js";
 import { INDEXABLE_TAGS } from "./common.js";
@@ -319,13 +319,13 @@ export async function getIdsForFilters(
 }
 
 /** Return all events for the given uids */
-async function loadEventsByUID(
+async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
   db: NostrIDBDatabase,
   uids: string[],
   filters: Filter[],
-  eventMap?: Map<string, NostrEvent>,
-): Promise<NostrEvent[]> {
-  const eventBuffer: NostrEvent[] = [];
+  eventMap?: Map<string, TEvent>,
+): Promise<TEvent[]> {
+  const eventBuffer: TEvent[] = [];
 
   // load from in-memory event map
   let remainingIds: string[] = [];
@@ -340,8 +340,8 @@ async function loadEventsByUID(
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
 
-  const handleEntry = (e?: { event: NostrEvent }) =>
-    e && eventBuffer.push(e.event);
+  const handleEntry = (e?: { event: StoredEvent }) =>
+    e && eventBuffer.push(e.event as TEvent);
   const promises = Array.from(remainingIds).map((uid) =>
     objectStore.get(uid).then(handleEntry),
   );
@@ -361,23 +361,27 @@ async function loadEventsByUID(
 }
 
 /** Return all events for the given filter */
-export async function getEventsForFilter(
+export async function getEventsForFilter<
+  TEvent extends StoredEvent = StoredEvent,
+>(
   db: NostrIDBDatabase,
   filter: Filter,
   indexCache?: IndexCache,
-  eventMap?: Map<string, NostrEvent>,
-): Promise<NostrEvent[]> {
+  eventMap?: Map<string, TEvent>,
+): Promise<TEvent[]> {
   const ids = await getIdsForFilter(db, filter, indexCache);
   return await loadEventsByUID(db, Array.from(ids), [filter], eventMap);
 }
 
 /** Return all events for the given filters */
-export async function getEventsForFilters(
+export async function getEventsForFilters<
+  TEvent extends StoredEvent = StoredEvent,
+>(
   db: NostrIDBDatabase,
   filters: Filter[],
   indexCache?: IndexCache,
-  eventMap?: Map<string, NostrEvent>,
-): Promise<NostrEvent[]> {
+  eventMap?: Map<string, TEvent>,
+): Promise<TEvent[]> {
   const ids = await getIdsForFilters(db, filters, indexCache);
   return await loadEventsByUID(db, Array.from(ids), filters, eventMap);
 }

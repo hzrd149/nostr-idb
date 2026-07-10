@@ -1,4 +1,4 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import type { Filter } from "../lib/nostr.js";
 
 /**
@@ -15,19 +15,19 @@ export type Features = "search";
  * methods are compatible with that spec. The `deleteEvent`, `deleteReplaceable`,
  * `deleteByFilters`, and `deleteAllEvents` methods are local extensions.
  */
-export interface INostrIDB {
+export interface INostrIDB<TEvent extends StoredEvent = StoredEvent> {
   /** Add an event to the database */
-  add(event: NostrEvent): Promise<boolean>;
+  add(event: TEvent): Promise<boolean>;
 
   /** Get a single event by ID */
-  event(id: string): Promise<NostrEvent | undefined>;
+  event(id: string): Promise<TEvent | undefined>;
 
   /** Get the latest version of a replaceable event */
   replaceable(
     kind: number,
     author: string,
     identifier?: string,
-  ): Promise<NostrEvent | undefined>;
+  ): Promise<TEvent | undefined>;
 
   /** Count the number of events matching filters */
   count(filters: Filter | Filter[]): Promise<number>;
@@ -36,12 +36,12 @@ export interface INostrIDB {
   supports(): Promise<string[]>;
 
   /** Get events by filters */
-  query(filters: Filter | Filter[]): Promise<NostrEvent[]>;
+  query(filters: Filter | Filter[]): Promise<TEvent[]>;
 
   /** Subscribe to events in the database based on filters */
   subscribe(
     filters: Filter | Filter[],
-  ): AsyncGenerator<NostrEvent, void, undefined>;
+  ): AsyncGenerator<TEvent, void, undefined>;
 
   /** Delete a single event by its ID or UID */
   deleteEvent(eventId: string): Promise<boolean>;

@@ -1,5 +1,5 @@
 import type { DBSchema, IDBPDatabase } from "idb";
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 
 export type NostrIDBDatabase = IDBPDatabase<Schema>;
 
@@ -8,7 +8,7 @@ export interface Schema extends DBSchema {
   events: {
     key: string;
     value: {
-      event: NostrEvent;
+      event: StoredEvent;
       tags: string[];
     };
     indexes: {

@@ -1,4 +1,4 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import { isEphemeralKind } from "../lib/nostr.js";
 import { matchFilters } from "../lib/nostr.js";
 import type { Filter } from "../lib/nostr.js";
@@ -26,7 +26,12 @@ import { openDB } from "../database/database.js";
 
 /** Internal subscription handlers */
 type InternalHandlers = {
-  event?: (event: NostrEvent) => void;
+  event?: (event: StoredEvent) => void;
+  complete?: () => void;
+};
+
+type InternalHandlersFor<TEvent extends StoredEvent> = {
+  event?: (event: TEvent) => void;
   complete?: () => void;
 };
 
@@ -38,6 +43,15 @@ export type InternalSubscription = InternalHandlers & {
   close: () => void;
   eose?: () => void;
 };
+
+export type InternalSubscriptionFor<TEvent extends StoredEvent> =
+  InternalHandlersFor<TEvent> & {
+    id: string;
+    filters: Filter[];
+    closed: boolean;
+    close: () => void;
+    eose?: () => void;
+  };
 
 export type NostrDBOptions = {
   /** Defaults to 1000 */
@@ -63,17 +77,19 @@ const defaultOptions: Required<NostrDBOptions> = {
 const log = logger.extend("nostridb");
 
 /** Main class that implements the nostrdb logic */
-export class NostrIDB implements INostrIDB {
+export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
+  implements INostrIDB<TEvent>
+{
   options: Required<NostrDBOptions>;
   running = false;
   private writeInterval?: ReturnType<typeof setTimeout>;
   private pruneInterval?: ReturnType<typeof setInterval>;
 
   /** In-memory map of events */
-  eventMap = new Map<string, NostrEvent>();
+  eventMap = new Map<string, TEvent>();
 
   /** Queue of events to be written to the database */
-  writeQueue: WriteQueue | null = null;
+  writeQueue: WriteQueue<TEvent> | null = null;
 
   /** Cache of indexes */
   indexCache: IndexCache;
@@ -85,14 +101,14 @@ export class NostrIDB implements INostrIDB {
   public baseEoseTimeout: number = 4400;
 
   /** Map of active subscriptions */
-  subscriptions: Map<string, InternalSubscription> = new Map();
+  subscriptions: Map<string, InternalSubscriptionFor<TEvent>> = new Map();
 
   constructor(db?: NostrIDBDatabase, opts: NostrDBOptions = {}) {
     this.options = { ...defaultOptions, ...opts };
 
     if (db) {
       this.db = db;
-      this.writeQueue = new WriteQueue(db);
+      this.writeQueue = new WriteQueue<TEvent>(db);
     }
     this.indexCache = new IndexCache();
     this.indexCache.max = this.options.cacheIndexes;
@@ -108,7 +124,7 @@ export class NostrIDB implements INostrIDB {
   private async getWriteQueue() {
     if (this.writeQueue) return this.writeQueue;
     const db = await this.getDb();
-    this.writeQueue = new WriteQueue(db);
+    this.writeQueue = new WriteQueue<TEvent>(db);
     return this.writeQueue;
   }
 
@@ -153,7 +169,7 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Add an event to the database */
-  async add(event: NostrEvent): Promise<boolean> {
+  async add(event: TEvent): Promise<boolean> {
     // if the event is not ephemeral, add it to the write queue and index cache
     if (!isEphemeralKind(event.kind)) {
       const queue = await this.getWriteQueue();
@@ -176,10 +192,10 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Get a single event by its ID */
-  async event(id: string): Promise<NostrEvent | undefined> {
+  async event(id: string): Promise<TEvent | undefined> {
     const db = await this.getDb();
     const result = await db.get("events", id);
-    return result?.event;
+    return result?.event as TEvent | undefined;
   }
 
   /** Get the latest replaceable event for a given kind, author, and optional identifier */
@@ -187,7 +203,7 @@ export class NostrIDB implements INostrIDB {
     kind: number,
     author: string,
     identifier?: string,
-  ): Promise<NostrEvent | undefined> {
+  ): Promise<TEvent | undefined> {
     // Events are stored using a unique identifier that is compatible with replaceable kinds
     return this.event([kind, author, identifier ?? ""].join(":"));
   }
@@ -200,7 +216,7 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Get events matching the given filters */
-  async query(filters: Filter | Filter[]): Promise<NostrEvent[]> {
+  async query(filters: Filter | Filter[]): Promise<TEvent[]> {
     const f = Array.isArray(filters) ? filters : [filters];
     const db = await this.getDb();
     const queue = await this.getWriteQueue();
@@ -220,11 +236,11 @@ export class NostrIDB implements INostrIDB {
     this.addToEventMaps(filterEvents);
 
     // Combine and deduplicate events
-    const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+    const idsFromQueue = new Set(eventsFromQueue.map((e) => getEventUID(e)));
     const events =
       eventsFromQueue.length > 0
         ? [
-            ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+            ...filterEvents.filter((e) => !idsFromQueue.has(getEventUID(e))),
             ...eventsFromQueue,
           ].sort(sortByDate)
         : filterEvents;
@@ -235,19 +251,20 @@ export class NostrIDB implements INostrIDB {
   /** Subscribe to events in the database based on filters */
   async *subscribe(
     filters: Filter | Filter[],
-  ): AsyncGenerator<NostrEvent, void, undefined> {
+  ): AsyncGenerator<TEvent, void, undefined> {
     const f = Array.isArray(filters) ? filters : [filters];
 
-    const queue: NostrEvent[] = [];
-    // seenIds deduplicates events that arrive both as historical (IDB) and live (add())
-    const seenIds = new Set<string>();
+    const queue: TEvent[] = [];
+    // seenUids deduplicates events that arrive both as historical (IDB) and live (add())
+    const seenUids = new Set<string>();
     let notify: (() => void) | null = null;
     let done = false;
 
     const sub = this.subscribeInternal(f, {
       event: (event) => {
-        if (seenIds.has(event.id)) return;
-        seenIds.add(event.id);
+        const uid = getEventUID(event);
+        if (seenUids.has(uid)) return;
+        seenUids.add(uid);
         queue.push(event);
         if (notify) {
           const fn = notify;
@@ -359,17 +376,17 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Add events to the event map */
-  protected addToEventMaps(events: Iterable<NostrEvent>) {
+  protected addToEventMaps(events: Iterable<TEvent>) {
     for (const event of events) this.eventMap.set(getEventUID(event), event);
   }
 
   protected subscribeInternal(
     filters: Filter[],
-    options: Partial<Omit<InternalSubscription, "id">>,
-  ): InternalSubscription {
+    options: Partial<Omit<InternalSubscriptionFor<TEvent>, "id">>,
+  ): InternalSubscriptionFor<TEvent> {
     const id = nanoid();
 
-    const sub: InternalSubscription = {
+    const sub: InternalSubscriptionFor<TEvent> = {
       id,
       filters,
       closed: false,
@@ -384,7 +401,7 @@ export class NostrIDB implements INostrIDB {
   }
 
   /** Execute a subscription */
-  protected async executeSubscription(sub: InternalSubscription) {
+  protected async executeSubscription(sub: InternalSubscriptionFor<TEvent>) {
     const start = new Date().valueOf();
     log(`Running ${sub.id}`, sub.filters);
 
@@ -406,12 +423,16 @@ export class NostrIDB implements INostrIDB {
           this.addToEventMaps(filterEvents);
 
           if (sub.event && !sub.closed) {
-            const idsFromQueue = new Set(eventsFromQueue.map((e) => e.id));
+            const idsFromQueue = new Set(
+              eventsFromQueue.map((e) => getEventUID(e)),
+            );
 
             const events =
               eventsFromQueue.length > 0
                 ? [
-                    ...filterEvents.filter((e) => !idsFromQueue.has(e.id)),
+                    ...filterEvents.filter(
+                      (e) => !idsFromQueue.has(getEventUID(e)),
+                    ),
                     ...eventsFromQueue,
                   ].sort(sortByDate)
                 : filterEvents;

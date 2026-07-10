@@ -1,6 +1,6 @@
-import type { NostrEvent } from "../lib/nostr.js";
+import type { StoredEvent } from "../lib/nostr.js";
 import { logger } from "../debug.js";
-import { getEventTags } from "../database/common.js";
+import { getEventTags, getEventUID } from "../database/common.js";
 
 const log = logger.extend("cache:indexes");
 
@@ -71,23 +71,25 @@ export class IndexCache {
     this.pruneIndexes();
   }
 
-  addEventToIndexes(event: NostrEvent) {
-    this.getKindIndex(event.kind)?.add(event.id);
-    this.getPubkeyIndex(event.pubkey)?.add(event.id);
+  addEventToIndexes(event: StoredEvent) {
+    const uid = getEventUID(event);
+    this.getKindIndex(event.kind)?.add(uid);
+    this.getPubkeyIndex(event.pubkey)?.add(uid);
 
     const tags = getEventTags(event);
     for (const tag of tags) {
-      this.getTagIndex(tag)?.add(event.id);
+      this.getTagIndex(tag)?.add(uid);
     }
   }
 
-  removeEvent(event: NostrEvent) {
-    this.getKindIndex(event.kind)?.delete(event.id);
-    this.getPubkeyIndex(event.pubkey)?.delete(event.id);
+  removeEvent(event: StoredEvent) {
+    const uid = getEventUID(event);
+    this.getKindIndex(event.kind)?.delete(uid);
+    this.getPubkeyIndex(event.pubkey)?.delete(uid);
 
     const tags = getEventTags(event);
     for (const tag of tags) {
-      this.getTagIndex(tag)?.delete(event.id);
+      this.getTagIndex(tag)?.delete(uid);
     }
   }
 

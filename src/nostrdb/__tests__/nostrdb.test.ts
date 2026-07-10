@@ -1,8 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  expectTypeOf,
+} from "vitest";
 import { NostrIDB } from "../nostrdb.js";
 import { openDB } from "../../database/database.js";
 import { getEventUID } from "../../database/common.js";
-import type { NostrEvent } from "../../lib/nostr.js";
+import type { NostrEvent, RumorEvent, StoredEvent } from "../../lib/nostr.js";
 import type { NostrIDBDatabase } from "../../database/schema.js";
 import { createTestEvent, getTestPublicKey } from "../../__tests__/helpers.js";
 
@@ -32,7 +39,38 @@ describe("NostrIDB", () => {
     return createTestEvent({ kind, created_at, tags });
   };
 
+  const createRumor = (
+    id = "b".repeat(64),
+    kind = 1,
+    created_at = Math.floor(Date.now() / 1000),
+    tags: string[][] = [],
+  ): RumorEvent => ({
+    id,
+    pubkey: testPubkey,
+    created_at,
+    kind,
+    tags,
+    content: "unsigned rumor",
+  });
+
   describe("add", () => {
+    it("should support typed database instances", () => {
+      expectTypeOf<NostrIDB<NostrEvent>["add"]>()
+        .parameter(0)
+        .toEqualTypeOf<NostrEvent>();
+      expectTypeOf<NostrIDB<RumorEvent>["add"]>()
+        .parameter(0)
+        .toEqualTypeOf<RumorEvent>();
+      expectTypeOf<NostrIDB["add"]>().parameter(0).toEqualTypeOf<StoredEvent>();
+
+      expectTypeOf<
+        NostrIDB<NostrEvent>["event"]
+      >().returns.resolves.toEqualTypeOf<NostrEvent | undefined>();
+      expectTypeOf<
+        NostrIDB<RumorEvent>["query"]
+      >().returns.resolves.toEqualTypeOf<RumorEvent[]>();
+    });
+
     it("should add an event to the database", async () => {
       const event = createEvent();
       const result = await nostrDB.add(event);
@@ -75,6 +113,19 @@ describe("NostrIDB", () => {
       expect(result.value?.id).toBe(event.id);
 
       await gen.return(undefined);
+    });
+
+    it("should add an unsigned rumor event", async () => {
+      const rumor = createRumor();
+      const result = await nostrDB.add(rumor);
+
+      expect(result).toBe(true);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const stored = await nostrDB.event(rumor.id);
+      expect(stored).toMatchObject(rumor);
+      expect("sig" in stored!).toBe(false);
     });
   });
 
@@ -182,6 +233,22 @@ describe("NostrIDB", () => {
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe(event.id);
     });
+
+    it("should query unsigned rumor events", async () => {
+      const rumor = createRumor("c".repeat(64), 1, 2000, [["p", "recipient"]]);
+      await nostrDB.add(rumor);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      const byId = await nostrDB.query({ ids: [rumor.id] });
+      const byAuthor = await nostrDB.query({ authors: [testPubkey] });
+      const byTag = await nostrDB.query({ "#p": ["recipient"] });
+
+      expect(byId).toHaveLength(1);
+      expect(byId[0]).toEqual(rumor);
+      expect(byAuthor.map((event) => event.id)).toContain(rumor.id);
+      expect(byTag.map((event) => event.id)).toContain(rumor.id);
+    });
   });
 
   describe("count", () => {
@@ -256,6 +323,19 @@ describe("NostrIDB", () => {
       const result = await gen.next();
       expect(result.done).toBe(false);
       expect(result.value?.id).toBe(event.id);
+
+      await gen.return(undefined);
+    });
+
+    it("should yield unsigned rumor events", async () => {
+      const gen = nostrDB.subscribe([{ kinds: [1] }]);
+
+      const rumor = createRumor("d".repeat(64));
+      await nostrDB.add(rumor);
+
+      const result = await gen.next();
+      expect(result.done).toBe(false);
+      expect(result.value).toEqual(rumor);
 
       await gen.return(undefined);
     });
