@@ -1,5 +1,5 @@
 import {
-  type NostrEvent,
+  type StoredEvent,
   validateEvent,
   isAddressableKind,
   isReplaceableKind,
@@ -8,7 +8,10 @@ import { getEventTags, getEventUID } from "./common.js";
 import type { NostrIDBDatabase } from "./schema.js";
 
 /** Add events to the database */
-export async function addEvents(db: NostrIDBDatabase, events: NostrEvent[]) {
+export async function addEvents<TEvent extends StoredEvent>(
+  db: NostrIDBDatabase,
+  events: TEvent[],
+) {
   // filter out invalid events
   events = events.filter((event) => validateEvent(event));
 

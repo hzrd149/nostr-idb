@@ -14,19 +14,32 @@ export type EventTemplate = {
 };
 
 /**
- * A Nostr event as defined by NIP-01.
- * Structurally identical to nostr-tools' NostrEvent so the two are
- * interchangeable at the type level without requiring nostr-tools at runtime.
+ * A Nostr event without a signature.
+ * This matches NIP-59 rumors: unsigned events that still have a computed id.
  */
-export interface NostrEvent {
+export interface UnsignedEvent {
   kind: number;
   tags: string[][];
   content: string;
   created_at: number;
   pubkey: string;
   id: string;
+}
+
+/** A NIP-59 rumor event. */
+export type RumorEvent = UnsignedEvent;
+
+/**
+ * A signed Nostr event as defined by NIP-01.
+ * Structurally identical to nostr-tools' NostrEvent so the two are
+ * interchangeable at the type level without requiring nostr-tools at runtime.
+ */
+export interface NostrEvent extends UnsignedEvent {
   sig: string;
 }
+
+/** A Nostr event shape that can be stored by nostr-idb. */
+export type StoredEvent = NostrEvent | RumorEvent;
 
 /** A Nostr filter as defined by NIP-01 */
 export type Filter = {
@@ -45,11 +58,13 @@ export type Filter = {
  * Validates the structural integrity of a Nostr event (NIP-01 field checks).
  * Mirrors the nostr-tools implementation without importing it.
  */
-export function validateEvent(event: NostrEvent): boolean {
+export function validateEvent(event: StoredEvent): boolean {
   if (typeof event !== "object" || event === null) return false;
   if (typeof event.kind !== "number") return false;
   if (typeof event.content !== "string") return false;
   if (typeof event.created_at !== "number") return false;
+  if (typeof event.id !== "string") return false;
+  if (!/^[a-f0-9]{64}$/.test(event.id)) return false;
   if (typeof event.pubkey !== "string") return false;
   if (!/^[a-f0-9]{64}$/.test(event.pubkey)) return false;
   if (!Array.isArray(event.tags)) return false;
@@ -104,7 +119,7 @@ export const IndexableTagsSymbol = Symbol.for("indexable-tags");
  * appear in enumerable properties.
  * Ported from applesauce-core/src/helpers/filter.ts
  */
-export function getIndexableTags(event: NostrEvent): Set<string> {
+export function getIndexableTags(event: StoredEvent): Set<string> {
   let cached = Reflect.get(event, IndexableTagsSymbol) as
     | Set<string>
     | undefined;
@@ -125,7 +140,7 @@ export function getIndexableTags(event: NostrEvent): Set<string> {
  * Ported from applesauce-core/src/helpers/filter.ts and adapted to the local
  * Filter type (which uses `&t` for AND and `#t` for OR tag filters).
  */
-export function matchFilter(filter: Filter, event: NostrEvent): boolean {
+export function matchFilter(filter: Filter, event: StoredEvent): boolean {
   if (filter.ids && filter.ids.indexOf(event.id) === -1) return false;
   if (filter.kinds && filter.kinds.indexOf(event.kind) === -1) return false;
   if (filter.authors && filter.authors.indexOf(event.pubkey) === -1)
@@ -169,7 +184,7 @@ export function matchFilter(filter: Filter, event: NostrEvent): boolean {
 }
 
 /** Matches an event against a list of filters (OR semantics across filters) */
-export function matchFilters(filters: Filter[], event: NostrEvent): boolean {
+export function matchFilters(filters: Filter[], event: StoredEvent): boolean {
   for (let i = 0; i < filters.length; i++) {
     if (matchFilter(filters[i], event)) return true;
   }

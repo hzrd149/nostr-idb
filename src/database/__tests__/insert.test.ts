@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { addEvents, updateUsed } from "../insert.js";
 import { openDB } from "../database.js";
 import { getEventUID } from "../common.js";
-import type { NostrEvent } from "../../lib/nostr.js";
+import type { NostrEvent, RumorEvent } from "../../lib/nostr.js";
 import type { NostrIDBDatabase } from "../schema.js";
 import { createTestEvent, getTestPublicKey } from "../../__tests__/helpers.js";
 
@@ -54,6 +54,24 @@ describe("addEvents", () => {
       const stored = await db.get("events", event.id);
       expect(stored?.tags).toContain("ereferenced-event");
       expect(stored?.tags).toContain("pmentioned-pubkey");
+    });
+
+    it("should add an unsigned rumor event to the database", async () => {
+      const rumor: RumorEvent = {
+        id: "a".repeat(64),
+        pubkey: getTestPublicKey(),
+        created_at: Math.floor(Date.now() / 1000),
+        kind: 1,
+        tags: [["p", "recipient"]],
+        content: "unsigned rumor",
+      };
+
+      await addEvents(db, [rumor]);
+
+      const stored = await db.get("events", rumor.id);
+      expect(stored?.event).toMatchObject(rumor);
+      expect("sig" in stored!.event).toBe(false);
+      expect(stored?.tags).toContain("precipient");
     });
 
     it("should filter out invalid events", async () => {
