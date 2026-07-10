@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 5.1.0
+
+### Minor Changes
+
+- e6488e0: Add support for storing unsigned events in database
+
 ## 5.0.0
 
 ### Major Changes
