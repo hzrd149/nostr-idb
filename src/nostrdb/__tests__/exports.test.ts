@@ -5,7 +5,9 @@ describe("exports", () => {
   it("should export the expected members", () => {
     expect(Object.keys(exports).sort()).toMatchInlineSnapshot(`
       [
+        "EncryptedNostrIDB",
         "NostrIDB",
+        "PrivateNostrIDB",
       ]
     `);
   });

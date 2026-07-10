@@ -7,10 +7,21 @@ import {
 } from "idb";
 import { isAddressableKind, isReplaceableKind } from "../lib/nostr.js";
 import { getEventUID } from "./common.js";
-import { NostrIDBDatabase, Schema } from "./schema.js";
+import {
+  EncryptedNostrIDBDatabase,
+  EncryptedSchema,
+  NostrIDBDatabase,
+  PrivateNostrIDBDatabase,
+  PrivateSchema,
+  Schema,
+} from "./schema.js";
 
 export const NOSTR_IDB_NAME = "nostr-idb";
 export const NOSTR_IDB_VERSION = 3;
+export const ENCRYPTED_NOSTR_IDB_NAME = "nostr-idb-encrypted";
+export const ENCRYPTED_NOSTR_IDB_VERSION = 1;
+export const PRIVATE_NOSTR_IDB_NAME = "nostr-idb-private";
+export const PRIVATE_NOSTR_IDB_VERSION = 1;
 
 /** Open a database with the given name and version */
 export async function openDB(
@@ -43,6 +54,58 @@ export async function openDB(
 
       // Migrate replaceable event UIDs for v3
       if (oldVersion <= 2) await migrateReplaceableEventUIDs(transaction);
+
+      if (callbacks?.upgrade)
+        callbacks.upgrade(db, oldVersion, newVersion, transaction, event);
+    },
+  });
+}
+
+/** Open an encrypted database that keeps query metadata in cleartext */
+export async function openEncryptedDB(
+  name = ENCRYPTED_NOSTR_IDB_NAME,
+  callbacks?: OpenDBCallbacks<EncryptedSchema>,
+): Promise<EncryptedNostrIDBDatabase> {
+  return await idbOpenDB<EncryptedSchema>(name, ENCRYPTED_NOSTR_IDB_VERSION, {
+    ...callbacks,
+    async upgrade(db, oldVersion, newVersion, transaction, event) {
+      if (oldVersion === 0) {
+        const events = db.createObjectStore("events");
+        events.createIndex("id", "event.id", { unique: true });
+        events.createIndex("pubkey", "event.pubkey");
+        events.createIndex("kind", "event.kind");
+        events.createIndex("created_at", "event.created_at");
+        events.createIndex("tags", "tags", { multiEntry: true });
+
+        const used = db.createObjectStore("used", { keyPath: "uid" });
+        used.createIndex("date", "date");
+      }
+
+      if (callbacks?.upgrade)
+        callbacks.upgrade(db, oldVersion, newVersion, transaction, event);
+    },
+  });
+}
+
+/** Open an encrypted database that stores HMAC-tokenized query indexes */
+export async function openPrivateDB(
+  name = PRIVATE_NOSTR_IDB_NAME,
+  callbacks?: OpenDBCallbacks<PrivateSchema>,
+): Promise<PrivateNostrIDBDatabase> {
+  return await idbOpenDB<PrivateSchema>(name, PRIVATE_NOSTR_IDB_VERSION, {
+    ...callbacks,
+    async upgrade(db, oldVersion, newVersion, transaction, event) {
+      if (oldVersion === 0) {
+        const events = db.createObjectStore("events");
+        events.createIndex("id", "indexes.id", { unique: true });
+        events.createIndex("pubkey", "indexes.pubkey");
+        events.createIndex("kind", "indexes.kind");
+        events.createIndex("created_at", "indexes.created_at");
+        events.createIndex("tags", "indexes.tags", { multiEntry: true });
+
+        const used = db.createObjectStore("used", { keyPath: "uid" });
+        used.createIndex("date", "date");
+      }
 
       if (callbacks?.upgrade)
         callbacks.upgrade(db, oldVersion, newVersion, transaction, event);

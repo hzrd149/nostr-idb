@@ -449,3 +449,72 @@ input[type="text"].sm {
   align-items: center;
   margin-top: 6px;
 }
+
+/* ── Encryption lab ─────────────────────────────────────────── */
+
+.hint-text {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0 0 10px;
+}
+
+.error-text {
+  color: var(--red);
+  font-size: 0.75rem;
+  margin-top: 8px;
+}
+
+.benchmark-table-wrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.benchmark-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+.benchmark-table th,
+.benchmark-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 5px 6px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.benchmark-table th:first-child,
+.benchmark-table td:first-child {
+  text-align: left;
+}
+
+.benchmark-table th {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.stored-preview {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  padding: 8px;
+}
+
+.stored-preview summary {
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.stored-preview pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  white-space: pre;
+}

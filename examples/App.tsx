@@ -7,9 +7,10 @@ import { QueryPanel } from "./components/QueryPanel.tsx";
 import { Nip91Panel } from "./components/Nip91Panel.tsx";
 import { StatsPanel } from "./components/StatsPanel.tsx";
 import { EventList } from "./components/EventList.tsx";
+import { EncryptionLabPanel } from "./components/EncryptionLabPanel.tsx";
 import { addEvents } from "../src/index.ts";
 
-type Tab = "relay" | "query" | "nip91" | "stats";
+type Tab = "relay" | "query" | "nip91" | "encryption" | "stats";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("relay");
@@ -89,6 +90,12 @@ export default function App() {
             >
               NIP-91 AND Filter
             </button>
+            <button
+              className={`tab${tab === "encryption" ? " active" : ""}`}
+              onClick={() => setTab("encryption")}
+            >
+              Encryption Lab
+            </button>
           </div>
 
           <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -152,6 +159,9 @@ export default function App() {
               )}
               {tab === "nip91" && (
                 <Nip91Panel dbState={dbState} onResults={handleQueryResults} />
+              )}
+              {tab === "encryption" && (
+                <EncryptionLabPanel onResults={handleQueryResults} />
               )}
             </div>
 
