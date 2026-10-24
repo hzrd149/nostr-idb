@@ -1,7 +1,8 @@
 import type { StoredEvent } from "../lib/nostr.js";
 import { IndexCache } from "../cache/index-cache.js";
-import { sortByDate } from "../utils.js";
-import { INDEXABLE_TAGS } from "./common.js";
+import { selectEventsForFilters } from "../utils.js";
+import { matchFilter } from "../lib/nostr.js";
+import { getEventUID, INDEXABLE_TAGS } from "./common.js";
 import type { NostrIDBDatabase } from "./schema.js";
 import type { Filter } from "../lib/nostr.js";
 
@@ -232,7 +233,16 @@ export async function getIdsForFilter(
   // search is not supported, return an empty set
   if (filter.search) return new Set();
 
-  if (filter.ids) return new Set(filter.ids);
+  if (filter.ids) {
+    const rows = await Promise.all(
+      filter.ids.map((id) => db.getFromIndex("events", "id", id)),
+    );
+    return new Set(
+      rows.flatMap((row) =>
+        row && matchFilter(filter, row.event) ? [getEventUID(row.event)] : [],
+      ),
+    );
+  }
 
   let ids: Set<string> | null = null;
   const and = (iterable: Iterable<string>) => {
@@ -347,17 +357,8 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
   );
   trans.commit();
 
-  const sorted = await Promise.all(promises).then(() =>
-    eventBuffer.sort(sortByDate),
-  );
-
-  let minLimit = Infinity;
-  for (const filter of filters) {
-    if (filter.limit && filter.limit < minLimit) minLimit = filter.limit;
-  }
-  if (sorted.length > minLimit) sorted.length = minLimit;
-
-  return sorted;
+  await Promise.all(promises);
+  return selectEventsForFilters(eventBuffer, filters);
 }
 
 /** Return all events for the given filter */

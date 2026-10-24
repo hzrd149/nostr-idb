@@ -66,6 +66,7 @@ const nostrDB = new NostrIDB(db, {
   cacheIndexes: 1000, // Number of indexes to cache in memory (default: 1000)
   pruneInterval: 60000, // How often to prune old events in ms (default: 60000)
   maxEvents: 10000, // Maximum number of events to store (default: 10000)
+  maxMemoryEvents: 10000, // Event bodies cached in memory (defaults to maxEvents; 0 disables)
 });
 ```
 
@@ -199,7 +200,7 @@ Calls `deleteDB` from `idb`. See [deleteDB](https://www.npmjs.com/package/idb#de
 
 Removes the least recently used events until the database is at or below a size limit.
 
-The `NostrIDB` class automatically handles pruning based on the `maxEvents` option. You can also prune manually:
+The `NostrIDB` class automatically handles pruning based on the `maxEvents` option and removes pruned events from its in-memory caches. The `maxMemoryEvents` option bounds cached event bodies independently; evicted bodies can be loaded from disk again. Pending writes and active subscription buffers are separate from this cache limit. You can also prune manually:
 
 ```javascript
 import { openDB, pruneLastUsed } from "nostr-idb";

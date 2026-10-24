@@ -16,10 +16,10 @@ export async function pruneLastUsed(
   skip?: (event: StoredEvent) => boolean,
 ) {
   const count = await countEvents(db);
-  if (count <= maxEvents) return;
+  if (count <= maxEvents) return [];
   const diff = count - maxEvents;
 
-  if (diff <= 0) return;
+  if (diff <= 0) return [];
 
   log(`Pruning database to ${maxEvents}`);
 
@@ -41,7 +41,7 @@ export async function pruneLastUsed(
     i--;
   }
 
-  if (uidsToDelete.length === 0) return;
+  if (uidsToDelete.length === 0) return [];
 
   const eventsTransaction = db.transaction("events", "readwrite");
   const usedTransaction = db.transaction("used", "readwrite");
@@ -54,6 +54,11 @@ export async function pruneLastUsed(
 
   eventsTransaction.commit();
   usedTransaction.commit();
-  await Promise.all(promises);
+  await Promise.all([
+    ...promises,
+    eventsTransaction.done,
+    usedTransaction.done,
+  ]);
   log(`Removed ${uidsToDelete.length} old events`);
+  return uidsToDelete;
 }

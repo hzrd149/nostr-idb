@@ -145,8 +145,10 @@ export function matchFilter(filter: Filter, event: StoredEvent): boolean {
   if (filter.kinds && filter.kinds.indexOf(event.kind) === -1) return false;
   if (filter.authors && filter.authors.indexOf(event.pubkey) === -1)
     return false;
-  if (filter.since && event.created_at < filter.since) return false;
-  if (filter.until && event.created_at > filter.until) return false;
+  if (filter.since !== undefined && event.created_at < filter.since)
+    return false;
+  if (filter.until !== undefined && event.created_at > filter.until)
+    return false;
 
   const tags = getIndexableTags(event);
 

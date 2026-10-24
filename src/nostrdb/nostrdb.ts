@@ -20,7 +20,7 @@ import {
 import type { NostrIDBDatabase } from "../database/schema.js";
 import { logger } from "../debug.js";
 import { nanoid } from "../lib/nanoid.js";
-import { sortByDate } from "../utils.js";
+import { selectEventsForFilters } from "../utils.js";
 import { type INostrIDB } from "./interface.js";
 import { openDB } from "../database/database.js";
 
@@ -64,6 +64,8 @@ export type NostrDBOptions = {
   pruneInterval?: number;
   /** Maximum number of events to store in the database */
   maxEvents?: number;
+  /** Maximum event bodies retained in memory. Defaults to maxEvents. */
+  maxMemoryEvents?: number;
 };
 
 const defaultOptions: Required<NostrDBOptions> = {
@@ -72,6 +74,7 @@ const defaultOptions: Required<NostrDBOptions> = {
   cacheIndexes: 1000,
   pruneInterval: 1000 * 60,
   maxEvents: 10000,
+  maxMemoryEvents: 10000,
 };
 
 const log = logger.extend("nostridb");
@@ -84,6 +87,7 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
   running = false;
   private writeInterval?: ReturnType<typeof setTimeout>;
   private pruneInterval?: ReturnType<typeof setInterval>;
+  private pruning = false;
 
   /** In-memory map of events */
   eventMap = new Map<string, TEvent>();
@@ -104,7 +108,19 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
   subscriptions: Map<string, InternalSubscriptionFor<TEvent>> = new Map();
 
   constructor(db?: NostrIDBDatabase, opts: NostrDBOptions = {}) {
-    this.options = { ...defaultOptions, ...opts };
+    this.options = {
+      ...defaultOptions,
+      ...opts,
+      maxMemoryEvents:
+        opts.maxMemoryEvents ??
+        opts.maxEvents ??
+        defaultOptions.maxMemoryEvents,
+    };
+    if (
+      !Number.isInteger(this.options.maxMemoryEvents) ||
+      this.options.maxMemoryEvents < 0
+    )
+      throw new Error("maxMemoryEvents must be a non-negative integer");
 
     if (db) {
       this.db = db;
@@ -149,7 +165,18 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
     const db = await this.getDb();
     await this.flush();
     this.pruneInterval = setInterval(() => {
-      pruneLastUsed(db, this.options.maxEvents);
+      if (this.pruning) return;
+      this.pruning = true;
+      pruneLastUsed(db, this.options.maxEvents)
+        .then((uids) => {
+          if (uids.length === 0) return;
+          for (const uid of uids) this.eventMap.delete(uid);
+          this.indexCache.clear();
+        })
+        .catch((error) => log("pruning failed", error))
+        .finally(() => {
+          this.pruning = false;
+        });
     }, this.options.pruneInterval);
   }
 
@@ -180,7 +207,7 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
     const uid = getEventUID(event);
     if (!this.eventMap.has(uid)) {
       // add the event to the in-memory event map
-      if (!isEphemeralKind(event.kind)) this.eventMap.set(uid, event);
+      if (!isEphemeralKind(event.kind)) this.addToEventMaps([event]);
 
       // Pass event to active subscriptions
       for (const [_id, sub] of this.subscriptions) {
@@ -227,7 +254,7 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
     // Get events from database
     const filterEvents = await getEventsForFilters(
       db,
-      f,
+      eventsFromQueue.length ? f.map(({ limit, ...filter }) => filter) : f,
       this.indexCache,
       this.eventMap,
     );
@@ -242,10 +269,10 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
         ? [
             ...filterEvents.filter((e) => !idsFromQueue.has(getEventUID(e))),
             ...eventsFromQueue,
-          ].sort(sortByDate)
+          ]
         : filterEvents;
 
-    return events;
+    return selectEventsForFilters(events, f);
   }
 
   /** Subscribe to events in the database based on filters */
@@ -377,7 +404,14 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
 
   /** Add events to the event map */
   protected addToEventMaps(events: Iterable<TEvent>) {
-    for (const event of events) this.eventMap.set(getEventUID(event), event);
+    for (const event of events) {
+      const uid = getEventUID(event);
+      this.eventMap.delete(uid);
+      this.eventMap.set(uid, event);
+      while (this.eventMap.size > this.options.maxMemoryEvents) {
+        this.eventMap.delete(this.eventMap.keys().next().value!);
+      }
+    }
   }
 
   protected subscribeInternal(
@@ -417,44 +451,49 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
       }, this.baseEoseTimeout);
 
       // get events
-      getEventsForFilters(db, sub.filters, this.indexCache, this.eventMap).then(
-        (filterEvents) => {
-          clearTimeout(timeout);
-          this.addToEventMaps(filterEvents);
+      getEventsForFilters(
+        db,
+        eventsFromQueue.length
+          ? sub.filters.map(({ limit, ...filter }) => filter)
+          : sub.filters,
+        this.indexCache,
+        this.eventMap,
+      ).then((filterEvents) => {
+        clearTimeout(timeout);
+        this.addToEventMaps(filterEvents);
 
-          if (sub.event && !sub.closed) {
-            const idsFromQueue = new Set(
-              eventsFromQueue.map((e) => getEventUID(e)),
-            );
+        if (sub.event && !sub.closed) {
+          const idsFromQueue = new Set(
+            eventsFromQueue.map((e) => getEventUID(e)),
+          );
 
-            const events =
-              eventsFromQueue.length > 0
-                ? [
-                    ...filterEvents.filter(
-                      (e) => !idsFromQueue.has(getEventUID(e)),
-                    ),
-                    ...eventsFromQueue,
-                  ].sort(sortByDate)
-                : filterEvents;
+          const events =
+            eventsFromQueue.length > 0
+              ? [
+                  ...filterEvents.filter(
+                    (e) => !idsFromQueue.has(getEventUID(e)),
+                  ),
+                  ...eventsFromQueue,
+                ]
+              : filterEvents;
 
-            for (const event of events) {
-              try {
-                sub.event(event);
-              } catch (error) {
-                log(`event handler failed with error`, error);
-              }
+          for (const event of selectEventsForFilters(events, sub.filters)) {
+            try {
+              sub.event(event);
+            } catch (error) {
+              log(`event handler failed with error`, error);
             }
-
-            const delta = new Date().valueOf() - start;
-            log(
-              `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
-            );
           }
 
-          if (sub.eose && !sub.closed) sub.eose();
-          res();
-        },
-      );
+          const delta = new Date().valueOf() - start;
+          log(
+            `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
+          );
+        }
+
+        if (sub.eose && !sub.closed) sub.eose();
+        res();
+      });
     });
   }
 
