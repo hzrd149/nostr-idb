@@ -1,5 +1,11 @@
 # nostr-idb
 
+## 5.1.1
+
+### Patch Changes
+
+- 92d3562: Fix ID filtering, per-filter query limits, and stale caches after pruning. Add `maxMemoryEvents` to bound cached event bodies.
+
 ## 5.1.0
 
 ### Minor Changes
