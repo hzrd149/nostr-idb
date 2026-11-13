@@ -7,6 +7,12 @@
 - Add committed-data `queryPage()`, `pages()`, and `iterate()` APIs with serializable continuation cursors, deterministic timestamp/UID ordering, both traversal directions, cancellation, and bounded page/scan sizes.
 - Export low-level `getEventsPage`, `iterateEventPages`, and `iterateEvents` helpers. Traversal uses short transactions without eager candidate sets or cache population; sparse filters may return empty continuation pages.
 
+### Features
+
+- Add generic event sidecar metadata with typed extraction/attachment hooks, explicit metadata on `add`, and independent `setMetadata` / `clearMetadata` operations.
+- Preserve sidecars across duplicate saves, replace them without merging, and isolate them by exact event ID across replaceable-event versions; support pending, cached, and persisted reads and updates.
+- Expose low-level sidecar writes and row-reader callbacks without requiring a database version upgrade.
+
 ### Diagnostics
 
 - Replace the direct `debug` dependency with browser console logging and library-wide `configureDiagnostics({ debug, timing })` flags, both off by default.

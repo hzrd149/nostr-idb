@@ -214,10 +214,12 @@ describe("cursor pagination", () => {
     const iterator = iterateEvents(db, {}, { pageSize: 2 });
     const first = await iterator.next();
     expect(first.done).toBe(false);
+    expect(get).toHaveBeenCalledTimes(2);
     // A write must complete while the consumer is paused.
     await addEvents(db, [createTestEvent({ kind: 1, created_at: 999 })]);
+    get.mockClear();
     await iterator.return();
-    expect(get).toHaveBeenCalledTimes(2);
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("honors cancellation before reading and between buffered events", async () => {

@@ -7,4 +7,5 @@ export * from "./prune.js";
 export * from "./schema.js";
 export * from "./common.js";
 export * from "./delete.js";
+export * from "./metadata.js";
 export { configureDiagnostics, type DiagnosticsOptions } from "../debug.js";

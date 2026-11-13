@@ -1,5 +1,6 @@
 import { matchFilters, type Filter, type StoredEvent } from "../lib/nostr.js";
-import type { NostrIDBDatabase } from "./schema.js";
+import type { NostrIDBDatabase, Schema } from "./schema.js";
+import type { EventReader } from "./metadata.js";
 
 /** Opaque, serializable continuation returned by queryPage. */
 export type QueryCursor = string;
@@ -51,6 +52,7 @@ export async function getEventsPage<TEvent extends StoredEvent = StoredEvent>(
   db: NostrIDBDatabase,
   filters: Filter | Filter[] = {},
   options: QueryPageOptions = {},
+  readEvent?: EventReader<TEvent>,
 ): Promise<QueryPage<TEvent>> {
   const {
     pageSize = 100,
@@ -128,7 +130,7 @@ export async function getEventsPage<TEvent extends StoredEvent = StoredEvent>(
 
   const tx = db.transaction("events", "readonly");
   const store = tx.objectStore("events");
-  const events: TEvent[] = [];
+  const rows: Schema["events"]["value"][] = [];
   let scanned = 0;
   let last: Position | undefined;
   // Key cursors avoid deserializing the resume row and the look-ahead row.
@@ -147,20 +149,21 @@ export async function getEventsPage<TEvent extends StoredEvent = StoredEvent>(
     )
       cursor = await cursor.continue();
   }
-  while (cursor && scanned < scanLimit && events.length < pageSize) {
+  while (cursor && scanned < scanLimit && rows.length < pageSize) {
     if (signal?.aborted) break;
     last = { time: cursor.key, uid: cursor.primaryKey };
     scanned++;
     const row = await store.get(cursor.primaryKey);
-    if (row && matchFilters(active, row.event))
-      events.push(row.event as TEvent);
+    if (row && matchFilters(active, row.event)) rows.push(row);
     cursor = await cursor.continue();
   }
   await tx.done;
   signal?.throwIfAborted();
   const done = cursor === null;
   return {
-    events,
+    events: rows.map((row) =>
+      readEvent ? readEvent(row) : (row.event as TEvent),
+    ),
     done,
     scanned,
     nextCursor:
@@ -177,15 +180,21 @@ export async function* iterateEventPages<
   db: NostrIDBDatabase,
   filters: Filter | Filter[] = {},
   options: QueryPageOptions = {},
+  readEvent?: EventReader<TEvent>,
 ): AsyncGenerator<QueryPage<TEvent>, void, undefined> {
   const stableFilters = prepare(filters);
   const stableOptions = { ...options };
   let cursor = stableOptions.cursor;
   while (true) {
-    const page = await getEventsPage<TEvent>(db, stableFilters, {
-      ...stableOptions,
-      cursor,
-    });
+    const page = await getEventsPage<TEvent>(
+      db,
+      stableFilters,
+      {
+        ...stableOptions,
+        cursor,
+      },
+      readEvent,
+    );
     yield page;
     if (page.done) return;
     cursor = page.nextCursor;
@@ -197,9 +206,15 @@ export async function* iterateEvents<TEvent extends StoredEvent = StoredEvent>(
   db: NostrIDBDatabase,
   filters: Filter | Filter[] = {},
   options: QueryPageOptions = {},
+  readEvent?: EventReader<TEvent>,
 ): AsyncGenerator<TEvent, void, undefined> {
   const signal = options.signal;
-  for await (const page of iterateEventPages<TEvent>(db, filters, options)) {
+  for await (const page of iterateEventPages<TEvent>(
+    db,
+    filters,
+    options,
+    readEvent,
+  )) {
     for (const event of page.events) {
       signal?.throwIfAborted();
       yield event;

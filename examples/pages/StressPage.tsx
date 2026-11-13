@@ -1,4 +1,5 @@
 import React, { useRef, useState, type ReactNode } from "react";
+import { Play, Square } from "lucide-react";
 import type { Filter, StoredEvent } from "../../src/index.ts";
 import { Bars, HBars, Histogram, Scatter } from "../components/charts.tsx";
 import { Field, NumberField, Segmented, Stat } from "../components/ui.tsx";
@@ -616,7 +617,7 @@ export function StressPage() {
               className="btn danger"
               onClick={() => (stopRef.current = true)}
             >
-              ■ stop
+              <Square size={16} /> stop
             </button>
           ) : (
             <button
@@ -624,7 +625,7 @@ export function StressPage() {
               disabled={!ready}
               onClick={RUN[workload]}
             >
-              ▶ run
+              <Play size={16} /> run
             </button>
           )}
           {results.length > 0 && !busy && (
@@ -636,7 +637,11 @@ export function StressPage() {
       </div>
 
       <div className="main scroll">
-        {results.length === 0 && <div className="results-empty">▶</div>}
+        {results.length === 0 && (
+          <div className="results-empty">
+            <Play size={32} />
+          </div>
+        )}
         {results.map((r) => (
           <div key={r.id} className={`run-panel ${r.status}`}>
             <div className="run-label">

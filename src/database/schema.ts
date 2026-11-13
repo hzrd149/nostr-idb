@@ -10,6 +10,7 @@ export interface Schema extends DBSchema {
     value: {
       event: StoredEvent;
       tags: string[];
+      metadata?: unknown;
     };
     indexes: {
       id: string;

@@ -1,4 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  Search,
+  CirclePlus,
+  Download,
+  Zap,
+  ChartPie,
+  RefreshCw,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 import type { Filter } from "../src/index.ts";
 import { ActivityLog } from "./components/ActivityLog.tsx";
 import { Field, NumberField } from "./components/ui.tsx";
@@ -16,13 +26,15 @@ import { InspectPage } from "./pages/InspectPage.tsx";
 import { QueryPage } from "./pages/QueryPage.tsx";
 import { StorePage } from "./pages/StorePage.tsx";
 import { StressPage } from "./pages/StressPage.tsx";
+import { SyncPage } from "./pages/SyncPage.tsx";
 
-const TABS: { tab: Tab; icon: string; label: string; key: string }[] = [
-  { tab: "query", icon: "⌕", label: "Query", key: "1" },
-  { tab: "store", icon: "＋", label: "Store", key: "2" },
-  { tab: "import", icon: "⇣", label: "Import", key: "3" },
-  { tab: "stress", icon: "⚡", label: "Stress", key: "4" },
-  { tab: "inspect", icon: "◫", label: "Inspect", key: "5" },
+const TABS: { tab: Tab; icon: LucideIcon; label: string; key: string }[] = [
+  { tab: "query", icon: Search, label: "Query", key: "1" },
+  { tab: "store", icon: CirclePlus, label: "Store", key: "2" },
+  { tab: "import", icon: Download, label: "Import", key: "3" },
+  { tab: "sync", icon: RefreshCw, label: "Sync", key: "4" },
+  { tab: "stress", icon: Zap, label: "Stress", key: "5" },
+  { tab: "inspect", icon: ChartPie, label: "Inspect", key: "6" },
 ];
 
 function OptionsPopover({ onClose }: { onClose: () => void }) {
@@ -113,7 +125,8 @@ function Header() {
         }}
       >
         <span className={`status-dot ${ready ? "open" : "connecting"}`} />
-        {name} ⚙
+        {name}
+        <Settings size={16} />
         {showOptions && (
           <OptionsPopover onClose={() => setShowOptions(false)} />
         )}
@@ -193,7 +206,7 @@ export default function App() {
               onClick={() => setTab(t.tab)}
               title={`Alt+${t.key}`}
             >
-              <span className="nav-icon">{t.icon}</span>
+              <t.icon className="nav-icon" size={22} />
               {t.label}
             </button>
           ))}
@@ -207,6 +220,9 @@ export default function App() {
           </div>
           <div className="tab" hidden={tab !== "import"}>
             <ImportPage />
+          </div>
+          <div className="tab" hidden={tab !== "sync"}>
+            <SyncPage />
           </div>
           <div className="tab" hidden={tab !== "stress"}>
             <StressPage />

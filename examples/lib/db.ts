@@ -1,11 +1,13 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import {
   NostrIDB,
+  addEvents,
   countEvents,
   deleteDB,
   openDB,
   type NostrDBOptions,
   type NostrIDBDatabase,
+  type StoredEvent,
 } from "../../src/index.ts";
 import { track } from "./activity.ts";
 
@@ -188,4 +190,19 @@ export function useLiveStats(interval = 1000): LiveStats | null {
   }, [db, nostr, interval]);
 
   return stats;
+}
+
+/**
+ * Keep the NostrIDB index cache in step with events written by the raw
+ * `addEvents()` function, which does not know about the cache
+ */
+export function indexEvents(events: StoredEvent[]) {
+  const cache = manager.snapshot.nostr?.indexCache;
+  if (cache) for (const e of events) cache.addEventToIndexes(e);
+}
+
+/** Batch write events with `addEvents()` and update the index cache */
+export async function writeEvents(events: StoredEvent[]) {
+  await addEvents(manager.db, events);
+  indexEvents(events);
 }

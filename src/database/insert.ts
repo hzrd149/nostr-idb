@@ -9,53 +9,56 @@ import {
 import { getEventTags, getEventUID } from "./common.js";
 import type { NostrIDBDatabase } from "./schema.js";
 
-/** Add events to the database */
+/** Add events, optionally replacing sidecars by exact event ID (undefined clears). */
 export async function addEvents<TEvent extends StoredEvent>(
   db: NostrIDBDatabase,
   events: TEvent[],
+  metadata: ReadonlyMap<string, unknown> = new Map(),
 ) {
   const end = startTimer("addEvents", db.name);
   try {
     // filter out invalid events
     events = events.filter((event) => validateEvent(event));
 
-    const replaceableEvents = events.filter(
-      (e) => isReplaceableKind(e.kind) || isAddressableKind(e.kind),
+    const snapshots = new Map(
+      Array.from(metadata, ([id, value]) => [id, structuredClone(value)]),
     );
-    const existingEvents: Record<string, number> = {};
-    if (replaceableEvents.length > 0) {
-      const readTransaction = db.transaction("events", "readonly");
-      const promises = replaceableEvents.map((e) => {
-        const uid = getEventUID(e);
-        return readTransaction.store
-          .get(uid)
-          .then((r) => r && (existingEvents[uid] = r.event.created_at));
-      });
-      readTransaction.commit();
-      await Promise.all(promises);
+    const groups = new Map<string, TEvent[]>();
+    for (const event of events) {
+      const uid = getEventUID(event);
+      const group = groups.get(uid);
+      if (group) group.push(event);
+      else groups.set(uid, [event]);
     }
-
     const writeTransaction = db.transaction("events", "readwrite");
     // Native requests avoid allocating an unused Promise for every write.
     // Request errors abort the transaction and reject its done Promise.
     const store = unwrap(writeTransaction.objectStore("events"));
-    for (const event of events) {
-      const uid = getEventUID(event);
-
-      // if the event is replaceable, only write it if its newer
-      if (!existingEvents[uid] || event.created_at > existingEvents[uid]) {
-        store.put(
-          {
-            event,
-            tags: getEventTags(event),
-          },
-          uid,
-        );
+    const writes = Array.from(groups, async ([uid, group]) => {
+      let row = await writeTransaction.store.get(uid);
+      let changed = false;
+      for (const event of group) {
+        const sameEvent = row?.event.id === event.id;
+        if (
+          row &&
+          !sameEvent &&
+          (isReplaceableKind(event.kind) || isAddressableKind(event.kind)) &&
+          event.created_at <= row.event.created_at
+        )
+          continue;
+        const sidecar = snapshots.has(event.id)
+          ? snapshots.get(event.id)
+          : sameEvent
+            ? row?.metadata
+            : undefined;
+        row = { event, tags: getEventTags(event) };
+        if (sidecar !== undefined) row.metadata = sidecar;
+        changed = true;
       }
-    }
-
-    writeTransaction.commit();
-    await writeTransaction.done;
+      if (changed) store.put(row!, uid);
+    });
+    const queued = Promise.all(writes).then(() => writeTransaction.commit());
+    await Promise.all([queued, writeTransaction.done]);
   } finally {
     end();
   }

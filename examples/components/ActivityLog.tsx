@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { clearActivity, useActivity, type Activity } from "../lib/activity.ts";
 import { fmtMs } from "../lib/nostr.ts";
 
@@ -64,7 +65,9 @@ export function ActivityLog() {
   return (
     <div className={`activity ${open ? "open" : ""}`}>
       <div className="activity-bar" onClick={() => setOpen((o) => !o)}>
-        <span className="activity-toggle">{open ? "▾" : "▴"}</span>
+        <span className="activity-toggle">
+          {open ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+        </span>
         <span className="activity-title">Activity</span>
         <span className="pill">{entries.length}</span>
         {running > 0 && (

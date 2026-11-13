@@ -1,15 +1,19 @@
 import type { StoredEvent } from "../lib/nostr.js";
+import type { EventReader } from "./metadata.js";
 import { NostrIDBDatabase } from "./schema.js";
 
 /** Returns the events from the given address pointers */
-export async function getReplaceableEvents(
+export async function getReplaceableEvents<
+  TEvent extends StoredEvent = StoredEvent,
+>(
   db: NostrIDBDatabase,
   pointers: { kind: number; pubkey: string; identifier?: string }[],
-): Promise<StoredEvent[]> {
+  readEvent: EventReader<TEvent> = (row) => row.event as TEvent,
+): Promise<TEvent[]> {
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
 
-  const events: Record<string, StoredEvent> = {};
+  const events: Record<string, TEvent> = {};
   const promises = pointers.map(async (pointer) => {
     const key = [pointer.kind, pointer.pubkey, pointer.identifier ?? ""].join(
       ":",
@@ -19,7 +23,7 @@ export async function getReplaceableEvents(
     if (row) {
       const existing = events[key];
       if (!existing || row.event.created_at > existing.created_at)
-        events[key] = row.event;
+        events[key] = readEvent(row);
     }
   });
 

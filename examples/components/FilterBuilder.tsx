@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import type { Filter } from "../../src/index.ts";
 import { KIND_NAMES, kindColor, parseFilters, shortHex } from "../lib/nostr.ts";
 import { Pubkey } from "./ResultsView.tsx";
@@ -202,7 +203,7 @@ function SingleFilter({
               title="remove"
               onClick={() => set(key, undefined)}
             >
-              ×
+              <X size={18} />
             </button>
           </div>
         );
@@ -264,11 +265,14 @@ export function FilterBuilder({
   onChange,
   hints,
   onSubmit,
+  single,
 }: {
   filters: Filter[];
   onChange: (f: Filter[]) => void;
   hints?: FilterHints;
   onSubmit?: () => void;
+  /** only edit one filter (e.g. NIP-77 negotiates a single filter) */
+  single?: boolean;
 }) {
   const [active, setActive] = useState(0);
   const [text, setText] = useState(() => JSON.stringify(filters, null, 2));
@@ -294,7 +298,7 @@ export function FilterBuilder({
         }
       }}
     >
-      <div className="fb-tabs">
+      <div className="fb-tabs" hidden={single}>
         {filters.map((_, i) => (
           <button
             type="button"
@@ -312,7 +316,7 @@ export function FilterBuilder({
                   setActive(Math.max(0, i - 1));
                 }}
               >
-                ×
+                <X size={14} />
               </span>
             )}
           </button>
