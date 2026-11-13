@@ -252,6 +252,7 @@ export class NostrIDB<
     const end = startTimer("NostrIDB.query", this.db?.name);
     try {
       const f = Array.isArray(filters) ? filters : [filters];
+      this.warnUnboundedQuery(f);
       const db = await this.getDb();
       const queue = await this.getWriteQueue();
 
@@ -290,6 +291,7 @@ export class NostrIDB<
     filters: Filter | Filter[],
   ): AsyncGenerator<TEvent, void, undefined> {
     const f = Array.isArray(filters) ? filters : [filters];
+    this.warnUnboundedQuery(f);
 
     const queue: TEvent[] = [];
     // seenUids deduplicates events that arrive both as historical (IDB) and live (add())
@@ -332,6 +334,20 @@ export class NostrIDB<
       }
     } finally {
       sub.close();
+    }
+  }
+
+  private warnUnboundedQuery(filters: Filter[]) {
+    if (
+      filters.some((filter) =>
+        Object.entries(filter).every(
+          ([key, value]) => value === undefined || (key === "search" && !value),
+        ),
+      )
+    ) {
+      console.warn(
+        "nostr-idb: An empty filter without a limit loads the entire database into memory. Use a limit to bound results.",
+      );
     }
   }
 

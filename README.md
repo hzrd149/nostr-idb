@@ -85,6 +85,18 @@ and NIP-91 `&tag` AND filters. Options control batching, write/prune intervals,
 index-cache size, stored-event limits, and in-memory event limits.
 See [options and implementation](./src/nostrdb/nostrdb.ts).
 
+An empty filter matches all stored kinds: `await db.query({})` returns every
+event, newest first. Use `await db.query({ limit: 100 })` to bound the result.
+Unlimited empty queries and subscriptions emit a console warning because their
+results can load the entire database into application memory. `db.count({})`
+counts all persisted events; `db.deleteByFilters({})` deletes all persisted events.
+An empty filter array (`[]`) remains invalid.
+
+Time filters such as `{ until: timestamp, limit: 100 }` also match all kinds.
+`until` is inclusive: timestamp-only pagination can repeat events, or skip events
+sharing the boundary timestamp if you subtract one second. There is currently no
+continuation-cursor API.
+
 ### Other exports
 
 All database helpers are available from both `nostr-idb` and `nostr-idb/database`.

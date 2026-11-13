@@ -17,6 +17,7 @@
 
 ### Fixes
 
+- Support empty and limit-only filters across stored event kinds, with bounded ID reads for limit-only filters and a console warning for unlimited empty `NostrIDB` queries and subscriptions.
 - Keep index-cache eviction tracking consistent when touching or replacing entries so capacity limits remain enforced.
 - Wait for write transactions to complete and propagate transaction failures from `addEvents` and `updateUsed`.
 

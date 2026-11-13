@@ -334,7 +334,37 @@ export async function getIdsForFilter(
     return limitIds;
   }
 
-  if (ids === null) throw new Error("Empty filter");
+  if (ids === null) {
+    // Empty and limit-only filters match every stored kind. Keep unsupported
+    // selector-only filters on their existing error path.
+    if (
+      !Object.entries(filter).every(
+        ([key, value]) =>
+          value === undefined ||
+          key === "limit" ||
+          (key === "search" && !value),
+      )
+    )
+      throw new Error("Empty filter");
+
+    const allIds = new Set<string>();
+    if (filter.limit === 0) return allIds;
+    const limit =
+      Number.isSafeInteger(filter.limit) && filter.limit! > 0
+        ? filter.limit
+        : undefined;
+    const transaction = db.transaction("events", "readonly");
+    let cursor = await transaction.store
+      .index("created_at")
+      .openKeyCursor(null, "prev");
+    while (cursor) {
+      allIds.add(cursor.primaryKey);
+      if (limit !== undefined && allIds.size >= limit) break;
+      cursor = await cursor.continue();
+    }
+    await transaction.done;
+    return allIds;
+  }
   return ids;
 }
 
