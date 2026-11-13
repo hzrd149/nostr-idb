@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestEvent } from "../../__tests__/helpers.js";
 import { openDB } from "../../database/database.js";
 import type { NostrEvent } from "../../lib/nostr.js";
@@ -189,6 +189,123 @@ describe("NostrIDBClient over a MessageChannel", () => {
     client.close();
     await expect(pending).rejects.toThrow("closed");
     await expect(client.count({})).rejects.toThrow("closed");
+  });
+
+  it("cancels idle subscriptions when the client closes", async () => {
+    const subscription = client.subscribe({ kinds: [1] });
+    const next = subscription.next();
+    const rejected = expect(next).rejects.toThrow("closed");
+    await expect.poll(() => nostr.subscriptions.size).toBe(1);
+    client.close();
+    await rejected;
+    await expect.poll(() => nostr.subscriptions.size).toBe(0);
+  });
+
+  it("cancels page streams suspended at a yield when the client closes", async () => {
+    let returned = false;
+    vi.spyOn(nostr, "pages").mockImplementation(async function* () {
+      try {
+        yield { events: [], done: false, scanned: 0 };
+      } finally {
+        returned = true;
+      }
+    });
+    const pages = client.pages();
+    await pages.next();
+    client.close();
+    await expect.poll(() => returned).toBe(true);
+    await pages.return();
+  });
+
+  it("aborts an outstanding queryPage on both sides", async () => {
+    let serverSignal: AbortSignal | undefined;
+    vi.spyOn(nostr, "queryPage").mockImplementation((_filters, options) => {
+      serverSignal = options!.signal!;
+      return new Promise((_resolve, reject) => {
+        serverSignal!.addEventListener(
+          "abort",
+          () => reject(serverSignal!.reason),
+          { once: true },
+        );
+      });
+    });
+    const controller = new AbortController();
+    const result = client.queryPage({}, { signal: controller.signal });
+    const rejected = expect(result).rejects.toThrow("cancel query");
+    await expect.poll(() => !!serverSignal).toBe(true);
+    controller.abort(new Error("cancel query"));
+    await rejected;
+    await expect.poll(() => serverSignal?.aborted).toBe(true);
+  });
+
+  it("aborts a pending page pull without yielding its result", async () => {
+    let serverSignal: AbortSignal | undefined;
+    let returned = false;
+    vi.spyOn(nostr, "pages").mockImplementation(
+      async function* (_filters, options) {
+        serverSignal = options!.signal!;
+        try {
+          await new Promise<void>((resolve) => {
+            serverSignal!.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+          yield { events: [], done: false, scanned: 0 };
+        } finally {
+          returned = true;
+        }
+      },
+    );
+    const controller = new AbortController();
+    const pages = client.pages({}, { signal: controller.signal });
+    const rejected = expect(pages.next()).rejects.toThrow("cancel page");
+    await expect.poll(() => !!serverSignal).toBe(true);
+    controller.abort(new Error("cancel page"));
+    await rejected;
+    await expect.poll(() => returned).toBe(true);
+  });
+
+  it("fails and cancels a subscription when metadata attachment throws", async () => {
+    client.close();
+    client = new NostrIDBClient(channel.port1, {
+      metadata: {
+        attach() {
+          throw new Error("attachment failed");
+        },
+      },
+    });
+    const subscription = client.subscribe({ kinds: [1] });
+    const rejected = expect(subscription.next()).rejects.toThrow(
+      "attachment failed",
+    );
+    await expect.poll(() => nostr.subscriptions.size).toBe(1);
+    await client.add(createTestEvent({ kind: 1 }), { relays: ["wss://a"] });
+    await rejected;
+    await expect.poll(() => nostr.subscriptions.size).toBe(0);
+    expect(await client.supports()).toEqual([]);
+  });
+
+  it("honors aborts while waiting for the server to become ready", async () => {
+    const isolated = new MessageChannel();
+    const waiting = new NostrIDBClient(isolated.port1);
+    const controller = new AbortController();
+    try {
+      const options = { signal: controller.signal };
+      const subscription = waiting.subscribe({}, options).next();
+      const page = expect(waiting.queryPage({}, options)).rejects.toThrow(
+        "not ready",
+      );
+      const pages = expect(waiting.pages({}, options).next()).rejects.toThrow(
+        "not ready",
+      );
+      controller.abort(new Error("not ready"));
+      expect(await subscription).toEqual({ done: true, value: undefined });
+      await Promise.all([page, pages]);
+    } finally {
+      waiting.close();
+      isolated.port1.close();
+      isolated.port2.close();
+    }
   });
 });
 

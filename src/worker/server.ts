@@ -71,6 +71,12 @@ export function serveNostrIDB(
   };
 
   async function call(id: number, method: CallMethod, args: unknown[]) {
+    const controller =
+      method === "queryPage" ? new AbortController() : undefined;
+    if (controller) {
+      streams.set(id, { controller });
+      args = [args[0], { ...(args[1] as object), signal: controller.signal }];
+    }
     try {
       const fn = nostr[method] as (...args: unknown[]) => Promise<unknown>;
       // keep the argument count: add(event, undefined) differs from add(event)
@@ -78,6 +84,8 @@ export function serveNostrIDB(
       post({ type: "result", id, value, meta: metadataFor(method, value) });
     } catch (error) {
       post({ type: "error", id, error: serializeError(error) });
+    } finally {
+      if (controller) streams.delete(id);
     }
   }
 

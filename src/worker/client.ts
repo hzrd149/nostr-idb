@@ -9,7 +9,6 @@ import {
   isMessage,
   type CallMethod,
   type ClientBody,
-  type ClientMessage,
   type MetadataList,
   type RPCEndpoint,
   type ServerMessage,
@@ -42,6 +41,22 @@ type PushStream = {
   wake?: () => void;
 };
 
+/** Wait for an operation while allowing cancellation, including before readiness. */
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+    if (signal.aborted) onAbort();
+  });
+}
+
 /**
  * An {@link INostrIDB} that forwards every call to a database served with
  * `serveNostrIDB()`, usually in a worker so IndexedDB reads, index building
@@ -69,6 +84,7 @@ export class NostrIDBClient<
   private nextId = 1;
   private pending = new Map<number, Pending>();
   private pushStreams = new Map<number, PushStream>();
+  private openStreams = new Set<number>();
   private closed?: Error;
   private markReady!: () => void;
 
@@ -88,12 +104,17 @@ export class NostrIDBClient<
    */
   close(reason = new Error("NostrIDBClient closed")) {
     if (this.closed) return;
+    for (const id of this.openStreams) this.cancelStream(id);
+    for (const [id, p] of this.pending) {
+      if (p.method === "queryPage") this.post({ type: "cancel", id });
+    }
     this.closed = reason;
     this.endpoint.removeEventListener("message", this.listener);
     this.markReady();
     for (const p of this.pending.values()) p.reject(reason);
     this.pending.clear();
     for (const s of this.pushStreams.values()) {
+      s.queue.length = 0;
       s.error = reason;
       s.wake?.();
     }
@@ -104,6 +125,10 @@ export class NostrIDBClient<
     this.endpoint.postMessage({ ...message, tag: RPC_TAG });
   }
 
+  private cancelStream(id: number) {
+    if (this.openStreams.delete(id)) this.post({ type: "cancel", id });
+  }
+
   private listener = (event: MessageEvent) => {
     const msg = event.data;
     if (!isMessage<ServerMessage>(msg)) return;
@@ -111,11 +136,22 @@ export class NostrIDBClient<
 
     const push = this.pushStreams.get(msg.id);
     if (push) {
-      if (msg.type === "next")
-        push.queue.push(this.restore("subscribe", msg.value, msg.meta));
-      else if (msg.type === "done") push.done = true;
+      if (msg.type === "next") {
+        try {
+          push.queue.push(this.restore("subscribe", msg.value, msg.meta));
+        } catch (error) {
+          push.error =
+            error instanceof Error ? error : new Error(String(error));
+          push.queue.length = 0;
+          this.cancelStream(msg.id);
+          this.pushStreams.delete(msg.id);
+        }
+      } else if (msg.type === "done") push.done = true;
       else if (msg.type === "error") push.error = deserializeError(msg.error);
-      if (msg.type !== "next") this.pushStreams.delete(msg.id);
+      if (msg.type !== "next") {
+        this.pushStreams.delete(msg.id);
+        this.openStreams.delete(msg.id);
+      }
       push.wake?.();
       return;
     }
@@ -146,15 +182,26 @@ export class NostrIDBClient<
     message:
       | { type: "call"; method: CallMethod; args: unknown[] }
       | { type: "pull"; id: number; method: StreamMethod },
+    signal?: AbortSignal,
   ): Promise<ServerMessage> {
-    await this.ready;
+    await abortable(this.ready, signal);
+    signal?.throwIfAborted();
     if (this.closed) throw this.closed;
     const id = message.type === "pull" ? message.id : this.nextId++;
-    return new Promise((resolve, reject) => {
+    const response = new Promise<ServerMessage>((resolve, reject) => {
       this.pending.set(id, { method: message.method, resolve, reject });
       if (message.type === "pull") this.post({ type: "pull", id });
       else this.post({ ...message, id });
     });
+    try {
+      const result = await abortable(response, signal);
+      signal?.throwIfAborted();
+      return result;
+    } finally {
+      this.pending.delete(id);
+      if (signal?.aborted && message.type === "call")
+        this.post({ type: "cancel", id });
+    }
   }
 
   private async call<T>(method: CallMethod, ...args: unknown[]): Promise<T> {
@@ -207,13 +254,19 @@ export class NostrIDBClient<
     return this.call("query", filters);
   }
 
-  queryPage(
+  async queryPage(
     filters: Filter | Filter[] = {},
     options: QueryPageOptions = {},
   ): Promise<QueryPage<TEvent>> {
     const { signal, ...rest } = options;
     signal?.throwIfAborted();
-    return this.call("queryPage", filters, rest);
+    const msg = await this.request(
+      { type: "call", method: "queryPage", args: [filters, rest] },
+      signal,
+    );
+    signal?.throwIfAborted();
+    if (msg.type !== "result") throw new Error(`Unexpected ${msg.type}`);
+    return this.restore("queryPage", msg.value as QueryPage<TEvent>, msg.meta);
   }
 
   async *pages(
@@ -222,23 +275,23 @@ export class NostrIDBClient<
   ): AsyncGenerator<QueryPage<TEvent>, void, undefined> {
     const { signal, ...rest } = options;
     signal?.throwIfAborted();
-    await this.ready;
+    await abortable(this.ready, signal);
+    signal?.throwIfAborted();
     if (this.closed) throw this.closed;
 
     const id = this.nextId++;
     this.post({ type: "stream", id, method: "pages", args: [filters, rest] });
+    this.openStreams.add(id);
     // true until the server ends the stream, so early exits cancel it
     let open = true;
     try {
       for (;;) {
         signal?.throwIfAborted();
-        let msg: ServerMessage;
-        try {
-          msg = await this.request({ type: "pull", id, method: "pages" });
-        } catch (error) {
-          open = false;
-          throw error;
-        }
+        const msg = await this.request(
+          { type: "pull", id, method: "pages" },
+          signal,
+        );
+        signal?.throwIfAborted();
         if (msg.type === "done") {
           open = false;
           return;
@@ -247,7 +300,8 @@ export class NostrIDBClient<
         yield this.restore("pages", msg.value as QueryPage<TEvent>, msg.meta);
       }
     } finally {
-      if (open && !this.closed) this.post({ type: "cancel", id });
+      if (open) this.cancelStream(id);
+      else this.openStreams.delete(id);
     }
   }
 
@@ -269,7 +323,13 @@ export class NostrIDBClient<
   ): AsyncGenerator<TEvent, void, undefined> {
     const { signal } = options;
     if (signal?.aborted) return;
-    await this.ready;
+    try {
+      await abortable(this.ready, signal);
+    } catch (error) {
+      if (signal?.aborted) return;
+      throw error;
+    }
+    if (signal?.aborted) return;
     if (this.closed) throw this.closed;
 
     const id = this.nextId++;
@@ -277,9 +337,9 @@ export class NostrIDBClient<
     this.pushStreams.set(id, stream);
     const onAbort = () => stream.wake?.();
     signal?.addEventListener("abort", onAbort, { once: true });
-    this.post({ type: "stream", id, method: "subscribe", args: [filters] });
-
     try {
+      this.post({ type: "stream", id, method: "subscribe", args: [filters] });
+      this.openStreams.add(id);
       while (!signal?.aborted) {
         if (stream.queue.length > 0) {
           yield stream.queue.shift() as TEvent;
@@ -292,8 +352,8 @@ export class NostrIDBClient<
       }
     } finally {
       signal?.removeEventListener("abort", onAbort);
-      if (this.pushStreams.delete(id) && !this.closed)
-        this.post({ type: "cancel", id });
+      this.pushStreams.delete(id);
+      this.cancelStream(id);
     }
   }
 

@@ -29,6 +29,7 @@
 
 ### Fixes
 
+- Cancel worker RPC streams when clients close, honor pagination and subscription aborts while waiting for readiness or responses, and propagate subscription metadata attachment failures with server-side cleanup.
 - Support empty and limit-only filters across stored event kinds, with bounded ID reads for limit-only filters and a console warning for unlimited empty `NostrIDB` queries and subscriptions.
 - Keep index-cache eviction tracking consistent when touching or replacing entries so capacity limits remain enforced.
 - Wait for write transactions to complete and propagate transaction failures from `addEvents` and `updateUsed`.
