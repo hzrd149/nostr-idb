@@ -577,12 +577,44 @@ export class NostrIDB<
 
   /** Add events to the event map */
   protected addToEventMaps(events: Iterable<TEvent>) {
+    const map = this.eventMap;
+    const max = this.options.maxMemoryEvents;
+    if (max === 0) {
+      map.clear();
+      return;
+    }
+
+    // Only the last `max` distinct UIDs survive an oversized batch. Collect
+    // them backwards, retaining the last object for each UID, then restore
+    // insertion order. Keep the public Map instance intact.
+    if (Array.isArray(events) && events.length > max) {
+      const retained = new Map<string, TEvent>();
+      for (let i = events.length - 1; i >= 0; i--) {
+        const event = events[i];
+        const uid = getEventUID(event);
+        if (!retained.has(uid)) retained.set(uid, event);
+        if (retained.size === max) {
+          map.clear();
+          const entries = Array.from(retained);
+          for (let j = entries.length - 1; j >= 0; j--) {
+            const [key, value] = entries[j];
+            map.set(key, value);
+          }
+          return;
+        }
+      }
+    }
+
+    // Reuse a live iterator so successive evictions do not restart scans
+    // over deleted Map entries (especially costly for large Firefox caches).
+    let oldest: MapIterator<string> | undefined;
     for (const event of events) {
       const uid = getEventUID(event);
-      this.eventMap.delete(uid);
-      this.eventMap.set(uid, event);
-      while (this.eventMap.size > this.options.maxMemoryEvents) {
-        this.eventMap.delete(this.eventMap.keys().next().value!);
+      map.delete(uid);
+      map.set(uid, event);
+      while (map.size > max) {
+        oldest ??= map.keys();
+        map.delete(oldest.next().value!);
       }
     }
   }
