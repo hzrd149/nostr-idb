@@ -199,6 +199,193 @@ describe("IndexCache", () => {
   });
 
   describe("pruneIndexes", () => {
+    it("preserves successors when touching middle and newest entries", () => {
+      cache.max = 4;
+      for (const kind of [1, 2, 3, 4]) cache.setKindIndex(kind, []);
+
+      cache.getKindIndex(2);
+      expect(cache.lastUsed.map((index) => index.key)).toEqual([1, 3, 4, 2]);
+      cache.getKindIndex(2);
+      cache.getKindIndex(4);
+      expect(cache.lastUsed.map((index) => index.key)).toEqual([1, 3, 2, 4]);
+
+      cache.setKindIndex(5, []);
+      cache.setKindIndex(6, []);
+      expect([...cache.kinds.keys()]).toEqual([2, 4, 5, 6]);
+      expect(cache.lastUsed.map((index) => index.key)).toEqual([2, 4, 5, 6]);
+    });
+
+    it.each(["kind", "pubkey", "tag"] as const)(
+      "replaces a %s index without retaining or evicting stale objects",
+      (type) => {
+        cache.max = 2;
+        const set = (uids: string[]) => {
+          if (type === "kind") cache.setKindIndex(1, uids);
+          else if (type === "pubkey") cache.setPubkeyIndex("key", uids);
+          else cache.setTagIndex("key", uids);
+        };
+        const get = () => {
+          if (type === "kind") return cache.getKindIndex(1);
+          if (type === "pubkey") return cache.getPubkeyIndex("key");
+          return cache.getTagIndex("key");
+        };
+        set(["old"]);
+        const old = get();
+        cache.setKindIndex(99, []);
+        for (let i = 0; i < 20; i++) set(["new"]);
+        const current = get();
+        expect(current).not.toBe(old);
+        expect([...current!]).toEqual(["new"]);
+        expect(cache.count).toBe(2);
+        expect(cache.lastUsed).toHaveLength(2);
+        expect(cache.lastUsed).not.toContain(old);
+        expect(cache.kinds.has(99)).toBe(true);
+
+        cache.setKindIndex(100, []);
+        expect(cache.kinds.has(99)).toBe(false);
+        expect(get()).toBe(current);
+        cache.setKindIndex(101, []);
+        cache.setKindIndex(102, []);
+        expect(get()).toBeUndefined();
+        expect(cache.lastUsed).not.toContain(current);
+        expect(cache.count).toBe(2);
+      },
+    );
+
+    it("stays bounded across interleaved types, touches, and replacements", () => {
+      cache.max = 7;
+      const expected = new Map<string, unknown>();
+      for (let i = 0; i < 300; i++) {
+        const key = i % 11;
+        const type = i % 3;
+        const id = `${type}:${key}`;
+        if (type === 0) cache.setKindIndex(key, []);
+        else if (type === 1) cache.setPubkeyIndex(String(key), []);
+        else cache.setTagIndex(String(key), []);
+        expected.delete(id);
+        expected.set(id, undefined);
+        if (expected.size > cache.max) {
+          expected.delete(expected.keys().next().value!);
+        }
+
+        const touchKey = (i + 5) % 11;
+        const touched = cache.getKindIndex(touchKey);
+        const touchID = `0:${touchKey}`;
+        expect(!!touched).toBe(expected.has(touchID));
+        if (touched) {
+          expected.delete(touchID);
+          expected.set(touchID, undefined);
+        }
+        expect(cache.count).toBe(expected.size);
+        expect(
+          cache.lastUsed.map(
+            (index) =>
+              `${["kind", "pubkey", "tag"].indexOf(index.type)}:${index.key}`,
+          ),
+        ).toEqual([...expected.keys()]);
+      }
+    });
+
+    it("does not reintroduce evicted keys during event updates", () => {
+      cache.max = 3;
+      const event = createEvent("event", 1, "pubkey", [["t", "topic"]]);
+      cache.setKindIndex(1, []);
+      cache.setPubkeyIndex("pubkey", []);
+      cache.setTagIndex("ttopic", []);
+      cache.setKindIndex(2, []);
+      cache.setPubkeyIndex("other", []);
+      expect(cache.kinds.has(1)).toBe(false);
+      expect(cache.pubkeys.has("pubkey")).toBe(false);
+      cache.addEventToIndexes(event);
+      expect(cache.tags.get("ttopic")?.has("event")).toBe(true);
+      expect(cache.lastUsed.at(-1)).toBe(cache.tags.get("ttopic"));
+      cache.removeEvent(event);
+      expect(cache.tags.get("ttopic")?.has("event")).toBe(false);
+      expect(cache.kinds.has(1)).toBe(false);
+      expect(cache.pubkeys.has("pubkey")).toBe(false);
+      expect(cache.count).toBe(3);
+      expect(cache.lastUsed).toHaveLength(3);
+      cache.setKindIndex(3, []);
+      expect(cache.kinds.has(2)).toBe(false);
+      expect(cache.tags.has("ttopic")).toBe(true);
+    });
+
+    it("supports shrinking capacity to zero and reuse after clearing", () => {
+      cache.setKindIndex(1, []);
+      cache.setPubkeyIndex("pubkey", []);
+      cache.max = 0;
+      cache.pruneIndexes();
+      expect(cache.count).toBe(0);
+      expect(cache.lastUsed).toEqual([]);
+      cache.setTagIndex("tag", []);
+      expect(cache.count).toBe(0);
+      cache.max = 2;
+      cache.setKindIndex(1, []);
+      cache.clear();
+      cache.setKindIndex(2, []);
+      cache.setKindIndex(3, []);
+      cache.setKindIndex(4, []);
+      expect([...cache.kinds.keys()]).toEqual([3, 4]);
+      expect(cache.lastUsed.map((index) => index.key)).toEqual([3, 4]);
+    });
+
+    it("accepts assigned LRU order and uses it for eviction", () => {
+      cache.max = 3;
+      cache.setKindIndex(1, []);
+      cache.setPubkeyIndex("pubkey", []);
+      cache.setTagIndex("tag", []);
+      const reversed = cache.lastUsed.reverse();
+      cache.lastUsed = reversed;
+      expect(cache.lastUsed).toEqual(reversed);
+      cache.setKindIndex(2, []);
+      expect(cache.tags.has("tag")).toBe(false);
+      expect(cache.lastUsed.map((index) => index.key)).toEqual([
+        "pubkey",
+        1,
+        2,
+      ]);
+    });
+
+    it("reconciles stale and duplicate assignments without losing omitted live indexes", () => {
+      cache.max = 3;
+      cache.setKindIndex(1, ["old"]);
+      const stale = cache.kinds.get(1)!;
+      cache.setKindIndex(1, ["current"]);
+      const current = cache.kinds.get(1)!;
+      cache.setPubkeyIndex("pubkey", []);
+      const pubkey = cache.pubkeys.get("pubkey")!;
+      cache.setTagIndex("tag", []);
+      cache.lastUsed = [current, stale, pubkey, current];
+      expect(cache.lastUsed.map((index) => index.key)).toEqual([
+        "tag",
+        "pubkey",
+        1,
+      ]);
+      expect(cache.lastUsed).not.toContain(stale);
+      expect(cache.count).toBe(3);
+
+      cache.max = 2;
+      cache.lastUsed = [];
+      expect(cache.tags.has("tag")).toBe(false);
+      expect(cache.lastUsed).toEqual([pubkey, current]);
+      cache.setTagIndex("new", []);
+      expect(cache.pubkeys.has("pubkey")).toBe(false);
+      expect(cache.kinds.get(1)).toBe(current);
+      expect(cache.count).toBe(2);
+    });
+
+    it("exposes an ordered snapshot without allowing array mutation to corrupt LRU", () => {
+      cache.max = 2;
+      cache.setKindIndex(1, []);
+      cache.setKindIndex(2, []);
+      const snapshot = cache.lastUsed;
+      snapshot.reverse();
+      snapshot.pop();
+      cache.setKindIndex(3, []);
+      expect([...cache.kinds.keys()]).toEqual([2, 3]);
+      expect(cache.lastUsed.map((index) => index.key)).toEqual([2, 3]);
+    });
+
     it("should prune indexes when count exceeds max", () => {
       cache.max = 3;
 

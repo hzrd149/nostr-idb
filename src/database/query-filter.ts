@@ -347,8 +347,64 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
     }
   } else remainingIds = uids;
 
+  if (remainingIds.length === 0)
+    return selectEventsForFilters(eventBuffer, filters);
+
   const trans = db.transaction("events", "readonly");
   const objectStore = trans.objectStore("events");
+
+  const filter = filters[0];
+  const limit = filter.limit;
+  // Only optimize simple index-backed filters. Time-filter candidate truncation
+  // and multi-filter limits retain their existing paths.
+  if (
+    filters.length === 1 &&
+    limit !== undefined &&
+    Number.isSafeInteger(limit) &&
+    limit > 0 &&
+    remainingIds.length >= 128 &&
+    remainingIds.length > limit * 2 &&
+    Object.keys(filter).every((key) =>
+      ["authors", "kinds", "limit"].includes(key),
+    )
+  ) {
+    const wanted = new Set(remainingIds);
+    const loaded = new Map<string, TEvent>();
+    let cursor = await objectStore
+      .index("created_at")
+      .openKeyCursor(null, "prev");
+    let cutoff: number | undefined;
+    let matched = 0;
+    let scanned = 0;
+    const scanBudget = Math.max(512, limit * 8);
+    while (cursor) {
+      if (cutoff !== undefined && cursor.key < cutoff) break;
+      // Avoid scanning the entire time index for sparse candidate selections.
+      if (cutoff === undefined && scanned >= scanBudget) break;
+      scanned++;
+      const uid = cursor.primaryKey;
+      if (wanted.has(uid)) {
+        const row = await objectStore.get(uid);
+        if (row && matchFilter(filter, row.event)) {
+          loaded.set(uid, row.event as TEvent);
+          if (++matched === limit) cutoff = cursor.key;
+        }
+      }
+      cursor = await cursor.continue();
+    }
+    if (!cursor || cutoff !== undefined) {
+      trans.commit();
+      // Read the whole cutoff timestamp bucket, then restore candidate order:
+      // date sorting is stable, and cached events must still precede disk rows.
+      // The newest `limit` missing matches suffice even if cached bodies have
+      // different timestamps or no longer match the filter.
+      for (const uid of remainingIds) {
+        const event = loaded.get(uid);
+        if (event) eventBuffer.push(event);
+      }
+      return selectEventsForFilters(eventBuffer, filters);
+    }
+  }
 
   const handleEntry = (e?: { event: StoredEvent }) =>
     e && eventBuffer.push(e.event as TEvent);

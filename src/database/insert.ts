@@ -1,3 +1,4 @@
+import { unwrap } from "idb";
 import {
   type StoredEvent,
   validateEvent,
@@ -32,12 +33,15 @@ export async function addEvents<TEvent extends StoredEvent>(
   }
 
   const writeTransaction = db.transaction("events", "readwrite");
+  // Native requests avoid allocating an unused Promise for every write.
+  // Request errors abort the transaction and reject its done Promise.
+  const store = unwrap(writeTransaction.objectStore("events"));
   for (const event of events) {
     const uid = getEventUID(event);
 
     // if the event is replaceable, only write it if its newer
     if (!existingEvents[uid] || event.created_at > existingEvents[uid]) {
-      writeTransaction.objectStore("events").put(
+      store.put(
         {
           event,
           tags: getEventTags(event),
@@ -47,20 +51,23 @@ export async function addEvents<TEvent extends StoredEvent>(
     }
   }
 
-  await writeTransaction.commit();
+  writeTransaction.commit();
+  await writeTransaction.done;
 }
 
 /** Update the last used timestamp of the given uids */
 export async function updateUsed(db: NostrIDBDatabase, uids: Iterable<string>) {
   const trans = db.transaction("used", "readwrite");
+  const store = unwrap(trans.objectStore("used"));
   const nowUnix = Math.floor(new Date().valueOf() / 1000);
 
   for (const uid of uids) {
-    trans.objectStore("used").put({
+    store.put({
       uid,
       date: nowUnix,
     });
   }
 
-  await trans.commit();
+  trans.commit();
+  await trans.done;
 }

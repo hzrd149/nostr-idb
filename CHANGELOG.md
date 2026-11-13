@@ -1,5 +1,23 @@
 # nostr-idb
 
+## Unreleased
+
+### Performance Improvements
+
+- Reduce event-body reads for limited author and kind queries while preserving timestamp ties, cached-event precedence, and filter semantics.
+- Reduce IndexedDB write overhead by avoiding unused per-request Promises.
+- Drain write queues in amortized linear time and support bulk enqueueing beyond JavaScript's argument limit.
+- Use constant-time LRU tracking for index-cache touches and eviction.
+
+### Fixes
+
+- Keep index-cache eviction tracking consistent when touching or replacing entries so capacity limits remain enforced.
+- Wait for write transactions to complete and propagate transaction failures from `addEvents` and `updateUsed`.
+
+### API Notes
+
+- `IndexCache.lastUsed` now returns an ordering snapshot. Assign a modified snapshot back to update eviction order; mutating the returned array alone no longer changes the cache.
+
 ## 5.1.1
 
 ### Patch Changes

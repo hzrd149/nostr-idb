@@ -12,6 +12,7 @@ export class WriteQueue<TEvent extends StoredEvent = StoredEvent> {
   db: NostrIDBDatabase;
   private queuedIds = new Set<string>();
   private eventQueue: TEvent[] = [];
+  private eventQueueHead = 0;
   private lastUsedQueue = new Set<string>();
 
   /** Called for each chunk of events before they are written to the database */
@@ -29,11 +30,17 @@ export class WriteQueue<TEvent extends StoredEvent = StoredEvent> {
     this.touch(event);
   }
   addEvents(events: TEvent[]) {
-    const arr = events.filter((e) => !this.queuedIds.has(getEventUID(e)));
-    if (arr.length === 0) return;
-    this.eventQueue.push(...arr);
-    for (const event of arr) this.queuedIds.add(getEventUID(event));
-    this.touch(arr);
+    const start = this.eventQueue.length;
+    for (const event of events) {
+      const uid = getEventUID(event);
+      if (this.queuedIds.has(uid)) continue;
+      this.eventQueue.push(event);
+      this.lastUsedQueue.add(uid);
+    }
+    // Publish IDs after filtering to preserve duplicates within a single call.
+    for (let i = start; i < this.eventQueue.length; i++) {
+      this.queuedIds.add(getEventUID(this.eventQueue[i]));
+    }
   }
 
   touch(event: TEvent | TEvent[]) {
@@ -45,18 +52,35 @@ export class WriteQueue<TEvent extends StoredEvent = StoredEvent> {
   }
 
   matchPending(filters: Filter[]) {
-    return this.eventQueue.filter((e) => matchFilters(filters, e));
+    const matches: TEvent[] = [];
+    for (let i = this.eventQueueHead; i < this.eventQueue.length; i++) {
+      const event = this.eventQueue[i];
+      if (matchFilters(filters, event)) matches.push(event);
+    }
+    return matches;
   }
 
   /** Write all events in the queue to the database */
   async flush(count = 1000) {
-    if (this.eventQueue.length > 0) {
+    if (this.eventQueueHead < this.eventQueue.length) {
       let events: TEvent[] = [];
-      for (let i = 0; i < count; i++) {
-        const event = this.eventQueue.shift();
-        if (!event) break;
+      for (
+        let i = 0;
+        i < count && this.eventQueueHead < this.eventQueue.length;
+        i++
+      ) {
+        const event = this.eventQueue[this.eventQueueHead++];
         events.push(event);
         this.queuedIds.delete(getEventUID(event));
+      }
+      // Each compaction copies at most as many entries as were consumed.
+      // Reset before awaiting the hook so newly queued events stay pending.
+      if (this.eventQueueHead === this.eventQueue.length) {
+        this.eventQueue = [];
+        this.eventQueueHead = 0;
+      } else if (this.eventQueueHead >= this.eventQueue.length / 2) {
+        this.eventQueue = this.eventQueue.slice(this.eventQueueHead);
+        this.eventQueueHead = 0;
       }
 
       if (this.processEvents) {
@@ -65,7 +89,8 @@ export class WriteQueue<TEvent extends StoredEvent = StoredEvent> {
 
       await addEvents(this.db, events);
       log(`Wrote ${events.length} to database`);
-      if (this.eventQueue.length > 0) log(`${this.eventQueue.length} left`);
+      const remaining = this.eventQueue.length - this.eventQueueHead;
+      if (remaining > 0) log(`${remaining} left`);
     }
 
     if (this.lastUsedQueue.size > 0) {
@@ -77,5 +102,6 @@ export class WriteQueue<TEvent extends StoredEvent = StoredEvent> {
   /** Clear the queue */
   clear() {
     this.eventQueue = [];
+    this.eventQueueHead = 0;
   }
 }

@@ -1,10 +1,87 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { addEvents, updateUsed } from "../insert.js";
 import { openDB } from "../database.js";
 import { getEventUID } from "../common.js";
 import type { NostrEvent, RumorEvent } from "../../lib/nostr.js";
 import type { NostrIDBDatabase } from "../schema.js";
 import { createTestEvent, getTestPublicKey } from "../../__tests__/helpers.js";
+
+describe.each(["addEvents", "updateUsed"] as const)(
+  "%s transaction lifecycle",
+  (operation) => {
+    let db: NostrIDBDatabase;
+    const event = createTestEvent({ kind: 1 });
+    const write = () =>
+      operation === "addEvents"
+        ? addEvents(db, [event])
+        : updateUsed(db, [event.id]);
+    const storeName = operation === "addEvents" ? "events" : "used";
+
+    beforeEach(async () => {
+      db = await openDB(`test-insert-lifecycle-${operation}-${Date.now()}`);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      db.close();
+    });
+
+    it("resolves only after the transaction completes", async () => {
+      let completed = false;
+      const transaction = IDBDatabase.prototype.transaction;
+      vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(
+        function (
+          this: IDBDatabase,
+          ...args: Parameters<IDBDatabase["transaction"]>
+        ) {
+          const result = transaction.apply(this, args);
+          // Register before idb's completion listener: browser event dispatch
+          // can run Promise callbacks between individual event listeners.
+          result.addEventListener("complete", () => (completed = true));
+          return result;
+        },
+      );
+
+      await write();
+
+      expect(completed).toBe(true);
+      expect(await db.count(storeName)).toBe(1);
+    });
+
+    it("rejects when the transaction is aborted", async () => {
+      vi.spyOn(IDBTransaction.prototype, "commit").mockImplementation(function (
+        this: IDBTransaction,
+      ) {
+        this.abort();
+      });
+
+      await expect(write()).rejects.toMatchObject({ name: "AbortError" });
+      expect(await db.count(storeName)).toBe(0);
+    });
+
+    it("propagates asynchronous request failures through the transaction", async () => {
+      await write();
+      // Force a real asynchronous ConstraintError on the existing primary key.
+      let requestError: string | undefined;
+      const add = IDBObjectStore.prototype.add;
+      vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (
+        this: IDBObjectStore,
+        value: unknown,
+        key?: IDBValidKey,
+      ) {
+        const request = add.call(this, value, key);
+        request.addEventListener("error", () => {
+          requestError = request.error?.name;
+        });
+        return request;
+      });
+
+      await expect(write()).rejects.toMatchObject({ name: "AbortError" });
+      expect(requestError).toBe("ConstraintError");
+      expect(await db.count(storeName)).toBe(1);
+    });
+  },
+);
 
 describe("addEvents", () => {
   let db: NostrIDBDatabase;
@@ -140,16 +217,16 @@ describe("addEvents", () => {
 
     it("should handle replaceable events with same timestamp", async () => {
       const pubkey = getTestPublicKey();
-      const event1 = createEvent(0, 1000);
-      const event2 = createEvent(0, 1000);
+      const event1 = createEvent(0, 1000, [], "first");
+      const event2 = createEvent(0, 1000, [], "second");
 
       await addEvents(db, [event1]);
       await addEvents(db, [event2]);
 
       const uid = `0:${pubkey}:`;
       const stored = await db.get("events", uid);
-      // Should store the second one since created_at is not less
-      expect(stored?.event.id).toBe(event2.id);
+      // Replacement requires a strictly newer timestamp.
+      expect(stored?.event.id).toBe(event1.id);
     });
 
     it("should store replaceable event kind 3 (contacts)", async () => {

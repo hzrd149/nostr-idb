@@ -52,6 +52,16 @@ describe("WriteQueue", () => {
   });
 
   describe("addEvents", () => {
+    it("preserves same-call duplicates while excluding already queued IDs", () => {
+      const first = createEvent();
+      const second = createEvent();
+      queue.addEvent(first);
+      queue.addEvents([first, second, second]);
+      expect(queue.matchPending([{}])).toEqual([first, second, second]);
+      expect(queue["queuedIds"].size).toBe(2);
+      expect(queue["lastUsedQueue"].size).toBe(2);
+    });
+
     it("should add multiple events to the queue", () => {
       const events = [createEvent(), createEvent(), createEvent()];
       queue.addEvents(events);
@@ -257,6 +267,102 @@ describe("WriteQueue", () => {
   });
 
   describe("flush", () => {
+    it("uses default 1000-event batches in FIFO order across compaction", async () => {
+      const base = createEvent();
+      const events = Array.from({ length: 2001 }, (_, i) => ({
+        ...base,
+        id: i.toString(16).padStart(64, "0"),
+      }));
+      queue.addEvents(events);
+      const batches: NostrEvent[][] = [];
+      queue.processEvents = async (batch) => {
+        batches.push(batch);
+        return [];
+      };
+      await queue.flush();
+      expect(batches[0]).toEqual(events.slice(0, 1000));
+      expect(queue.matchPending([{}])).toEqual(events.slice(1000));
+      expect(queue["queuedIds"].size).toBe(1001);
+      expect(await db.get("used", events[2000].id)).toBeDefined();
+      await queue.flush();
+      expect(batches[1]).toEqual(events.slice(1000, 2000));
+      expect(queue.matchPending([{}])).toEqual(events.slice(2000));
+      await queue.flush();
+      await queue.flush();
+      expect(batches.map((batch) => batch.length)).toEqual([1000, 1000, 1]);
+      expect(queue.matchPending([{}])).toEqual([]);
+      expect(queue["queuedIds"].size).toBe(0);
+    });
+
+    it("accepts and drains queues larger than the argument limit", async () => {
+      const base = createEvent();
+      const events = Array.from({ length: 150000 }, (_, i) => ({
+        ...base,
+        id: i.toString(16).padStart(64, "0"),
+      }));
+      queue.addEvents(events);
+      expect(queue["lastUsedQueue"].size).toBe(events.length);
+      // Isolate queue handling from 150k unrelated IndexedDB touch writes.
+      queue["lastUsedQueue"].clear();
+      let processed = 0;
+      queue.processEvents = async (batch) => {
+        for (const event of batch) {
+          if (event !== events[processed++]) throw new Error("Out of order");
+        }
+        return [];
+      };
+      while (processed < events.length) await queue.flush(16384);
+      expect(processed).toBe(events.length);
+      expect(queue.matchPending([{}])).toEqual([]);
+      expect(queue["queuedIds"].size).toBe(0);
+    });
+
+    it.each([1, 3])(
+      "keeps events added during an async hook pending (batch %i)",
+      async (count) => {
+        const events = [createEvent(), createEvent(), createEvent()];
+        const added = createEvent();
+        queue.addEvents(events);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        queue.processEvents = async () => {
+          await gate;
+        };
+        const flushing = queue.flush(count);
+        expect(queue.matchPending([{}])).toEqual(events.slice(count));
+        queue.addEvents([events[0], added]);
+        expect(queue.matchPending([{}])).toEqual([
+          ...events.slice(count),
+          events[0],
+          added,
+        ]);
+        release();
+        await flushing;
+        expect(queue["queuedIds"].has(events[0].id)).toBe(true);
+        expect(await db.get("used", added.id)).toBeDefined();
+        queue.processEvents = null;
+        await queue.flush();
+        expect(await db.get("events", added.id)).toBeDefined();
+        expect(queue.matchPending([{}])).toEqual([]);
+      },
+    );
+
+    it("preserves the remaining queue when the processing hook rejects", async () => {
+      const events = [createEvent(), createEvent(), createEvent()];
+      queue.addEvents(events);
+      queue.processEvents = async () => {
+        throw new Error("hook failed");
+      };
+      await expect(queue.flush(1)).rejects.toThrow("hook failed");
+      expect(queue.matchPending([{}])).toEqual(events.slice(1));
+      expect(queue["queuedIds"].has(events[0].id)).toBe(false);
+      queue.processEvents = null;
+      await queue.flush();
+      expect(await db.get("events", events[2].id)).toBeDefined();
+    });
+
     it("should write events to the database", async () => {
       const event = createEvent();
       queue.addEvent(event);
@@ -336,6 +442,17 @@ describe("WriteQueue", () => {
   });
 
   describe("clear", () => {
+    it("resets the pending cursor after a partial flush", async () => {
+      queue.addEvents([createEvent(), createEvent(), createEvent()]);
+      await queue.flush(1);
+      queue.clear();
+      const event = createEvent();
+      queue.addEvent(event);
+      expect(queue.matchPending([{}])).toEqual([event]);
+      await queue.flush();
+      expect(await db.get("events", event.id)).toBeDefined();
+    });
+
     it("should clear all events from the queue", () => {
       const events = [createEvent(), createEvent()];
       queue.addEvents(events);
