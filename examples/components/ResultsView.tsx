@@ -1,6 +1,7 @@
 import React, {
+  memo,
+  useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -19,6 +20,7 @@ import {
   shortHex,
 } from "../lib/nostr.ts";
 import { ConfirmButton, Segmented } from "./ui.tsx";
+import { VirtualList, type VirtualListHandle } from "./VirtualList.tsx";
 
 const ROW_HEIGHT = 36;
 
@@ -56,17 +58,11 @@ export function ResultsView({
   const [selected, setSelected] = useState<StoredEvent | null>(null);
   const [sort, setSort] = useState<Sort>("newest");
   const [search, setSearch] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [height, setHeight] = useState(400);
-
-  useLayoutEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => setHeight(el.clientHeight));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const listRef = useRef<VirtualListHandle>(null);
+  const toggle = useCallback(
+    (e: StoredEvent) => setSelected((s) => (s === e ? null : e)),
+    [],
+  );
 
   const rows = useMemo(() => {
     let list = events;
@@ -87,12 +83,6 @@ export function ResultsView({
     return sorted;
   }, [events, sort, search]);
 
-  const first = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 10);
-  const last = Math.min(
-    rows.length,
-    Math.ceil((scrollTop + height) / ROW_HEIGHT) + 10,
-  );
-
   // keyboard navigation
   function onKeyDown(e: React.KeyboardEvent) {
     if (!rows.length) return;
@@ -105,13 +95,7 @@ export function ResultsView({
     e.preventDefault();
     next = Math.max(0, Math.min(rows.length - 1, next));
     setSelected(rows[next]);
-    const el = scrollRef.current;
-    if (el) {
-      const y = next * ROW_HEIGHT;
-      if (y < el.scrollTop) el.scrollTop = y;
-      else if (y + ROW_HEIGHT > el.scrollTop + el.clientHeight)
-        el.scrollTop = y + ROW_HEIGHT - el.clientHeight;
-    }
+    listRef.current?.scrollToIndex(next);
   }
 
   return (
@@ -134,49 +118,30 @@ export function ResultsView({
             <option value="kind">kind</option>
           </select>
         </div>
-        <div
-          className="results-scroll"
-          ref={scrollRef}
-          tabIndex={0}
-          onKeyDown={onKeyDown}
-          onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
-        >
-          {rows.length === 0 ? (
+        {rows.length === 0 ? (
+          <div className="results-scroll">
             <div className="results-empty">{empty ?? <Inbox size={32} />}</div>
-          ) : (
-            <div
-              style={{ height: rows.length * ROW_HEIGHT, position: "relative" }}
-            >
-              {rows.slice(first, last).map((e, i) => (
-                <div
-                  key={e.id}
-                  className={`row ${selected === e ? "selected" : ""}`}
-                  style={{ top: (first + i) * ROW_HEIGHT, height: ROW_HEIGHT }}
-                  onClick={() => setSelected(selected === e ? null : e)}
-                >
-                  <KindBadge kind={e.kind} />
-                  <Pubkey pubkey={e.pubkey} n={6} />
-                  <span className="row-content">
-                    {e.content.slice(0, 200).replace(/\s+/g, " ") || (
-                      <span className="muted">
-                        {e.tags
-                          .slice(0, 4)
-                          .map((t) => `${t[0]} ${shortHex(t[1] ?? "", 8)}`)
-                          .join(" ")}
-                      </span>
-                    )}
-                  </span>
-                  <span
-                    className="row-time"
-                    title={new Date(e.created_at * 1000).toISOString()}
-                  >
-                    {reltime(e.created_at)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <VirtualList
+            className="results-scroll"
+            handle={listRef}
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            items={rows}
+            estimateSize={ROW_HEIGHT}
+            fixedSize
+            overscan={10}
+            getKey={(e) => e.id}
+            renderItem={(e) => (
+              <ResultRow
+                event={e}
+                selected={selected === e}
+                onToggle={toggle}
+              />
+            )}
+          />
+        )}
       </div>
       {selected && (
         <EventDetail
@@ -191,6 +156,43 @@ export function ResultsView({
     </div>
   );
 }
+
+const ResultRow = memo(function ResultRow({
+  event: e,
+  selected,
+  onToggle,
+}: {
+  event: StoredEvent;
+  selected: boolean;
+  onToggle: (e: StoredEvent) => void;
+}) {
+  return (
+    <div
+      className={`row ${selected ? "selected" : ""}`}
+      style={{ height: ROW_HEIGHT }}
+      onClick={() => onToggle(e)}
+    >
+      <KindBadge kind={e.kind} />
+      <Pubkey pubkey={e.pubkey} n={6} />
+      <span className="row-content">
+        {e.content.slice(0, 200).replace(/\s+/g, " ") || (
+          <span className="muted">
+            {e.tags
+              .slice(0, 4)
+              .map((t) => `${t[0]} ${shortHex(t[1] ?? "", 8)}`)
+              .join(" ")}
+          </span>
+        )}
+      </span>
+      <span
+        className="row-time"
+        title={new Date(e.created_at * 1000).toISOString()}
+      >
+        {reltime(e.created_at)}
+      </span>
+    </div>
+  );
+});
 
 function EventDetail({
   event,
@@ -211,6 +213,7 @@ function EventDetail({
     missing?: boolean;
   } | null>(null);
   const [view, setView] = useState<"fields" | "json">("fields");
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!db || !nostr) return;
@@ -260,7 +263,7 @@ function EventDetail({
       {view === "json" ? (
         <pre className="detail-json">{JSON.stringify(event, null, 2)}</pre>
       ) : (
-        <div className="detail-body">
+        <div className="detail-body" ref={bodyRef}>
           <dl className="fields">
             <dt>id</dt>
             <dd
@@ -302,23 +305,25 @@ function EventDetail({
           </dl>
 
           {event.tags.length > 0 && (
-            <table className="tags-table">
-              <tbody>
-                {event.tags.slice(0, 200).map((t, i) => {
-                  const indexable = t[0]?.length === 1 && t[1] !== undefined;
-                  return (
-                    <tr
-                      key={i}
-                      className={indexable ? "clickable" : ""}
-                      onClick={() => indexable && q({ [`#${t[0]}`]: [t[1]] })}
-                    >
-                      <td className="tag-name">{t[0]}</td>
-                      <td className="mono">{t.slice(1).join(" · ")}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <VirtualList
+              className="tags-list"
+              scrollParent={bodyRef}
+              items={event.tags}
+              estimateSize={28}
+              getKey={(_, i) => i}
+              renderItem={(t) => {
+                const indexable = t[0]?.length === 1 && t[1] !== undefined;
+                return (
+                  <div
+                    className={`tag-row ${indexable ? "clickable" : ""}`}
+                    onClick={() => indexable && q({ [`#${t[0]}`]: [t[1]] })}
+                  >
+                    <span className="tag-name">{t[0]}</span>
+                    <span className="mono">{t.slice(1).join(" · ")}</span>
+                  </div>
+                );
+              }}
+            />
           )}
 
           {event.content && <pre className="content">{event.content}</pre>}

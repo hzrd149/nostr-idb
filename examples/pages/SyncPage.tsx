@@ -14,6 +14,7 @@ import { Bars, HBars } from "../components/charts.tsx";
 import { FilterBuilder, cleanFilter } from "../components/FilterBuilder.tsx";
 import { RelayLabel, RelayPicker } from "../components/RelayPicker.tsx";
 import { ResultsView } from "../components/ResultsView.tsx";
+import { VirtualList } from "../components/VirtualList.tsx";
 import { NumberField, Segmented, Stat } from "../components/ui.tsx";
 import { begin, record } from "../lib/activity.ts";
 import { manager, useDB, writeEvents } from "../lib/db.ts";
@@ -518,19 +519,20 @@ export function SyncPage() {
                 <i className="seg-relay" /> relay only
               </span>
             </div>
-            <div className="sync-table">
-              {runs.map((r) => {
+            <VirtualList
+              className="sync-table"
+              items={runs}
+              estimateSize={84}
+              gap={10}
+              getKey={(r) => r.url}
+              renderItem={(r) => {
                 const local = session.local ?? 0;
                 const negotiated = r.method === "negentropy" && !r.error;
                 const both = negotiated ? Math.max(0, local - r.localOnly) : 0;
                 const pullTotal = direction !== "push" ? r.relayOnly : 0;
                 const pushTotal = direction !== "pull" ? r.localOnly : 0;
                 return (
-                  <div
-                    className={`sync-row ${r.status}`}
-                    key={r.url}
-                    title={r.error}
-                  >
+                  <div className={`sync-row ${r.status}`} title={r.error}>
                     <div className="sync-relay">
                       <RelayLabel url={r.url} showNip77 />
                       <span className="sync-status">
@@ -593,8 +595,8 @@ export function SyncPage() {
                     {r.error && <div className="error">{r.error}</div>}
                   </div>
                 );
-              })}
-            </div>
+              }}
+            />
 
             {rates.length > 1 && (
               <Bars

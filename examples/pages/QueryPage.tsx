@@ -14,6 +14,7 @@ import {
   type FilterHints,
 } from "../components/FilterBuilder.tsx";
 import { ResultsView } from "../components/ResultsView.tsx";
+import { VirtualList } from "../components/VirtualList.tsx";
 import { ConfirmButton } from "../components/ui.tsx";
 import { EngineSelect } from "../components/EngineSelect.tsx";
 import { ENGINES, runEngine, type Engine } from "../lib/engines.ts";
@@ -28,11 +29,14 @@ import {
 } from "../lib/nostr.ts";
 
 type HistoryEntry = {
+  id: number;
   filters: Filter[];
   engine: Engine;
   ms: number;
   count: number;
 };
+
+let nextHistoryId = 1;
 
 export function QueryPage({
   request,
@@ -114,7 +118,7 @@ export function QueryPage({
         const ms = performance.now() - t0;
         const count = typeof r === "number" ? r : r.length;
         setResults(typeof r === "number" ? [] : r);
-        const entry = { filters: f, engine: e, ms, count };
+        const entry = { id: nextHistoryId++, filters: f, engine: e, ms, count };
         setLast(entry);
         setHistory((h) => [entry, ...h].slice(0, 30));
       } catch (err) {
@@ -326,10 +330,14 @@ export function QueryPage({
         )}
 
         {history.length > 0 && (
-          <div className="history">
-            {history.map((h, i) => (
+          <VirtualList
+            className="history"
+            items={history}
+            estimateSize={28}
+            gap={2}
+            getKey={(h) => h.id}
+            renderItem={(h) => (
               <div
-                key={i}
                 className="history-row"
                 onClick={() => {
                   setFilters(h.filters);
@@ -343,8 +351,8 @@ export function QueryPage({
                 <span className="history-count">{fmtNum(h.count)}</span>
                 <span className="history-ms">{fmtMs(h.ms)}</span>
               </div>
-            ))}
-          </div>
+            )}
+          />
         )}
       </div>
 

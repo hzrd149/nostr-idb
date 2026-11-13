@@ -17,6 +17,7 @@ import {
   type ExplorerOptions,
 } from "../lib/db.ts";
 import { ConfirmButton, Field, NumberField, Segmented } from "./ui.tsx";
+import { VirtualList } from "./VirtualList.tsx";
 
 /** Toggle state for a popover that closes on any outside click */
 function usePopover() {
@@ -213,14 +214,20 @@ export function DatabasePicker({ onDone }: { onDone?: () => void }) {
       ) : existing.length + snort.length === 0 ? (
         <div className="muted">no databases yet</div>
       ) : (
-        <ul className="db-picker-list">
-          {[
+        <VirtualList
+          className="db-picker-list"
+          role="list"
+          items={[
             ...existing.map((db) => ({ db, isSnort: false })),
             ...snort.map((db) => ({ db, isSnort: true })),
-          ].map(({ db, isSnort }) => {
+          ]}
+          estimateSize={40}
+          gap={4}
+          getKey={({ db, isSnort }) => `${isSnort ? "snort" : "idb"}:${db}`}
+          renderItem={({ db, isSnort }) => {
             const isOpen = tabs.includes(db);
             return (
-              <li key={`${isSnort ? "snort" : "idb"}:${db}`}>
+              <div className="db-picker-item" role="listitem">
                 {isSnort ? (
                   <HardDrive size={16} className="muted" />
                 ) : (
@@ -251,10 +258,10 @@ export function DatabasePicker({ onDone }: { onDone?: () => void }) {
                 <ConfirmButton onConfirm={() => manager.remove(db)}>
                   <Trash2 size={16} /> delete
                 </ConfirmButton>
-              </li>
+              </div>
             );
-          })}
-        </ul>
+          }}
+        />
       )}
     </div>
   );

@@ -19,6 +19,7 @@ import {
   summarize,
 } from "../lib/nostr.ts";
 import { EngineSelect } from "../components/EngineSelect.tsx";
+import { VirtualList } from "../components/VirtualList.tsx";
 import { runEngine, type Engine } from "../lib/engines.ts";
 
 type Shape =
@@ -156,6 +157,7 @@ export function StressPage() {
   const [busy, setBusy] = useState(false);
   const stopRef = useRef(false);
   const nextId = useRef(1);
+  const mainRef = useRef<HTMLDivElement>(null);
 
   function update(id: number, patch: Partial<Result>) {
     setResults((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -503,7 +505,12 @@ export function StressPage() {
           warm.push(performance.now() - t);
           update(id, {
             chart: (
-              <CachePairs cold={[...cold]} warm={[...warm]} filters={filters} />
+              <CachePairs
+                cold={[...cold]}
+                warm={[...warm]}
+                filters={filters}
+                scrollParent={mainRef}
+              />
             ),
           });
         }
@@ -646,34 +653,43 @@ export function StressPage() {
         </div>
       </div>
 
-      <div className="main scroll">
+      <div className="main scroll" ref={mainRef}>
         {results.length === 0 && (
           <div className="results-empty">
             <Play size={32} />
           </div>
         )}
-        {results.map((r) => (
-          <div key={r.id} className={`run-panel ${r.status}`}>
-            <div className="run-label">
-              {r.status === "running" && <span className="spinner" />} {r.title}
-              <span className="muted"> {r.params}</span>
-            </div>
-            {r.error && <div className="error">{r.error}</div>}
-            {r.stats && (
-              <div className="stats">
-                {r.stats.map((s) => (
-                  <Stat
-                    key={s.label}
-                    label={s.label}
-                    value={s.value}
-                    tone={s.tone}
-                  />
-                ))}
+        <VirtualList
+          scrollParent={mainRef}
+          items={results}
+          estimateSize={240}
+          gap={16}
+          overscan={2}
+          getKey={(r) => r.id}
+          renderItem={(r) => (
+            <div className={`run-panel ${r.status}`}>
+              <div className="run-label">
+                {r.status === "running" && <span className="spinner" />}{" "}
+                {r.title}
+                <span className="muted"> {r.params}</span>
               </div>
-            )}
-            {r.chart}
-          </div>
-        ))}
+              {r.error && <div className="error">{r.error}</div>}
+              {r.stats && (
+                <div className="stats">
+                  {r.stats.map((s) => (
+                    <Stat
+                      key={s.label}
+                      label={s.label}
+                      value={s.value}
+                      tone={s.tone}
+                    />
+                  ))}
+                </div>
+              )}
+              {r.chart}
+            </div>
+          )}
+        />
       </div>
     </div>
   );
@@ -683,16 +699,24 @@ function CachePairs({
   cold,
   warm,
   filters,
+  scrollParent,
 }: {
   cold: number[];
   warm: number[];
   filters: Filter[];
+  scrollParent: React.RefObject<HTMLElement | null>;
 }) {
   const max = Math.max(1e-6, ...cold, ...warm);
   return (
-    <div className="pairs">
-      {cold.map((c, i) => (
-        <div className="pair" key={i} title={filterSummary([filters[i]])}>
+    <VirtualList
+      className="pairs"
+      scrollParent={scrollParent}
+      items={cold}
+      estimateSize={24}
+      gap={4}
+      getKey={(_, i) => i}
+      renderItem={(c, i) => (
+        <div className="pair" title={filterSummary([filters[i]])}>
           <span className="pair-label">{filterSummary([filters[i]])}</span>
           <span className="pair-bars">
             <span
@@ -709,7 +733,7 @@ function CachePairs({
             <span className="good">{fmtMs(warm[i])}</span>
           </span>
         </div>
-      ))}
-    </div>
+      )}
+    />
   );
 }

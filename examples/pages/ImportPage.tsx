@@ -4,6 +4,7 @@ import type { Filter, NostrEvent } from "../../src/index.ts";
 import { Bars } from "../components/charts.tsx";
 import { FilterBuilder, cleanFilter } from "../components/FilterBuilder.tsx";
 import { ResultsView } from "../components/ResultsView.tsx";
+import { VirtualList } from "../components/VirtualList.tsx";
 import { RelayPicker } from "../components/RelayPicker.tsx";
 import { NumberField, Segmented, Stat } from "../components/ui.tsx";
 import { begin, record } from "../lib/activity.ts";
@@ -204,47 +205,51 @@ export function ImportPage() {
                 )}
               />
             </div>
-            <table className="relay-table">
-              <thead>
-                <tr>
-                  <th />
-                  <th>relay</th>
-                  <th>received</th>
-                  <th>dupes</th>
-                  <th>pages</th>
-                  <th>connect</th>
-                  <th>1st EOSE</th>
-                  <th>oldest</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <tr key={r.url} title={r.error}>
-                    <td>
+            <div className="relay-table">
+              <div className="relay-table-row relay-table-head">
+                <span />
+                <span>relay</span>
+                <span>received</span>
+                <span>dupes</span>
+                <span>pages</span>
+                <span>connect</span>
+                <span>1st EOSE</span>
+                <span>oldest</span>
+              </div>
+              <VirtualList
+                className="relay-table-body"
+                items={runs}
+                estimateSize={33}
+                getKey={(r) => r.url}
+                renderItem={(r) => (
+                  <div className="relay-table-row" title={r.error}>
+                    <span>
                       <span
                         className={`status-dot ${r.status}`}
                         title={r.status}
                       />
-                    </td>
-                    <td className="mono">{r.url.replace("wss://", "")}</td>
-                    <td>{fmtNum(r.received)}</td>
-                    <td className="muted">{fmtNum(r.duplicates)}</td>
-                    <td>{r.pages}</td>
-                    <td>
+                    </span>
+                    <span className="relay-table-url">
+                      {r.url.replace("wss://", "")}
+                    </span>
+                    <span>{fmtNum(r.received)}</span>
+                    <span className="muted">{fmtNum(r.duplicates)}</span>
+                    <span>{r.pages}</span>
+                    <span>
                       {r.connectMs !== undefined ? fmtMs(r.connectMs) : "–"}
-                    </td>
-                    <td>
+                    </span>
+                    <span>
                       {r.firstEoseMs !== undefined ? fmtMs(r.firstEoseMs) : "–"}
-                    </td>
-                    <td className="muted">
+                    </span>
+                    <span className="muted">
                       {r.oldest
                         ? new Date(r.oldest * 1000).toLocaleDateString()
                         : "–"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
+                  </div>
+                )}
+              />
+            </div>
             {rates.length > 1 && (
               <Bars
                 values={rates}

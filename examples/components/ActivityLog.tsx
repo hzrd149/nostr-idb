@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { memo, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { clearActivity, useActivity, type Activity } from "../lib/activity.ts";
 import { fmtMs } from "../lib/nostr.ts";
+import { VirtualList } from "./VirtualList.tsx";
 
 function durationTone(ms?: number) {
   if (ms === undefined) return "";
@@ -11,7 +12,7 @@ function durationTone(ms?: number) {
   return "veryslow";
 }
 
-function Row({ a, max }: { a: Activity; max: number }) {
+const Row = memo(function Row({ a, max }: { a: Activity; max: number }) {
   const d = a.duration;
   return (
     <div className={`act-row ${a.status}`}>
@@ -41,7 +42,7 @@ function Row({ a, max }: { a: Activity; max: number }) {
       </span>
     </div>
   );
-}
+});
 
 export function ActivityLog() {
   const entries = useActivity();
@@ -55,9 +56,10 @@ export function ActivityLog() {
     return [...counts];
   }, [entries]);
 
-  const visible = category
-    ? entries.filter((e) => e.category === category)
-    : entries;
+  const visible = useMemo(
+    () => (category ? entries.filter((e) => e.category === category) : entries),
+    [entries, category],
+  );
   const max = Math.max(1, ...visible.slice(0, 300).map((e) => e.duration ?? 0));
   const running = entries.filter((e) => e.status === "running").length;
   const latest = entries[0];
@@ -112,11 +114,13 @@ export function ActivityLog() {
         )}
       </div>
       {open && (
-        <div className="activity-list">
-          {visible.slice(0, 500).map((a) => (
-            <Row key={a.id} a={a} max={max} />
-          ))}
-        </div>
+        <VirtualList
+          className="activity-list"
+          items={visible}
+          estimateSize={29}
+          getKey={(a) => a.id}
+          renderItem={(a) => <Row a={a} max={max} />}
+        />
       )}
     </div>
   );

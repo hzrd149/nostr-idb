@@ -8,6 +8,7 @@ import {
 } from "../../src/index.ts";
 import { Bars, HBars } from "../components/charts.tsx";
 import { KindBadge, Pubkey } from "../components/ResultsView.tsx";
+import { VirtualList } from "../components/VirtualList.tsx";
 import {
   ConfirmButton,
   NumberField,
@@ -209,7 +210,7 @@ function IDBInspect({ active }: { active: boolean }) {
   }
 
   const cache = manager.snapshot.nostr?.indexCache;
-  const cacheIndexes = cache ? cache.lastUsed.reverse().slice(0, 60) : [];
+  const cacheIndexes = cache ? cache.lastUsed.reverse() : [];
 
   const usagePct =
     live?.usage && live.quota ? (live.usage / live.quota) * 100 : 0;
@@ -467,10 +468,13 @@ function IDBInspect({ active }: { active: boolean }) {
               </button>
             }
           >
-            <div className="cache-list">
-              {cacheIndexes.map((index, i) => (
+            <VirtualList
+              className="cache-list"
+              items={cacheIndexes}
+              estimateSize={30}
+              getKey={(index) => `${index.type}:${index.key}`}
+              renderItem={(index) => (
                 <div
-                  key={i}
                   className="cache-row clickable"
                   onClick={() =>
                     openQuery([
@@ -500,8 +504,8 @@ function IDBInspect({ active }: { active: boolean }) {
                   </span>
                   <span className="cache-size">{fmtNum(index.size)}</span>
                 </div>
-              ))}
-            </div>
+              )}
+            />
           </Section>
         </div>
       </div>
