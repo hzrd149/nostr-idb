@@ -1,23 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
-import { addEvents, type Filter, type NostrEvent } from "../../src/index.ts";
+import { Play, Square } from "lucide-react";
+import type { Filter, NostrEvent } from "../../src/index.ts";
 import { Bars } from "../components/charts.tsx";
 import { FilterBuilder, cleanFilter } from "../components/FilterBuilder.tsx";
 import { ResultsView } from "../components/ResultsView.tsx";
-import { ChipInput, NumberField, Segmented, Stat } from "../components/ui.tsx";
+import { RelayPicker } from "../components/RelayPicker.tsx";
+import { NumberField, Segmented, Stat } from "../components/ui.tsx";
 import { begin, record } from "../lib/activity.ts";
-import { manager, useDB } from "../lib/db.ts";
+import { manager, useDB, writeEvents } from "../lib/db.ts";
+import { PRESET_RELAYS } from "../lib/pool.ts";
 import { filterSummary, fmtMs, fmtNum } from "../lib/nostr.ts";
 import { ImportSession, type ImportMode } from "../lib/relay.ts";
-
-const PRESET_RELAYS = [
-  "wss://relay.ditto.pub",
-  "wss://nos.lol",
-  "wss://relay.damus.io",
-  "wss://relay.primal.net",
-  "wss://relay.nostr.band",
-  "wss://nostr.wine",
-  "wss://purplepag.es",
-];
 
 type Sink = "nostr.add" | "addEvents";
 
@@ -55,7 +48,7 @@ export function ImportPage() {
         const batch = bufferRef.current.splice(0);
         const t0 = performance.now();
         try {
-          await addEvents(manager.db, batch);
+          await writeEvents(batch);
           record(
             "store",
             `addEvents() × ${batch.length}`,
@@ -138,16 +131,7 @@ export function ImportPage() {
     <div className="page">
       <div className="side">
         <div className="group-title">relays</div>
-        <ChipInput
-          values={relays}
-          onChange={setRelays}
-          parse={(s) => (/^wss?:\/\//.test(s) ? s : s ? "wss://" + s : null)}
-          suggestions={PRESET_RELAYS.map((r) => ({
-            value: r,
-            label: "+" + r.replace("wss://", ""),
-          }))}
-          placeholder="wss://…"
-        />
+        <RelayPicker relays={relays} onChange={setRelays} />
 
         <div className="group-title">filter</div>
         <FilterBuilder
@@ -187,7 +171,7 @@ export function ImportPage() {
         <div className="btn-row">
           {session?.running ? (
             <button className="btn danger" onClick={() => session.stop()}>
-              ■ stop
+              <Square size={16} /> stop
             </button>
           ) : (
             <button
@@ -195,7 +179,7 @@ export function ImportPage() {
               disabled={!ready || !relays.length}
               onClick={start}
             >
-              ▶ import
+              <Play size={16} /> import
             </button>
           )}
         </div>

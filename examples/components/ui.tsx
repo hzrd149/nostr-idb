@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, type ReactNode } from "react";
+import { X } from "lucide-react";
 
 export function Segmented<T extends string | number>({
   value,
@@ -172,7 +173,7 @@ export function ChipInput({
               type="button"
               onClick={() => onChange(values.filter((x) => x !== v))}
             >
-              ×
+              <X size={14} />
             </button>
           </span>
         ))}

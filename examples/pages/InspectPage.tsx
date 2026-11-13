@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { FileDown, Scissors } from "lucide-react";
 import {
   clearDB,
   countEventsByKind,
@@ -197,7 +198,7 @@ export function InspectPage({ active }: { active: boolean }) {
               load();
             }}
           >
-            ✂ prune
+            <Scissors size={16} /> prune
           </button>
         </div>
         <div className="btn-row">
@@ -222,7 +223,7 @@ export function InspectPage({ active }: { active: boolean }) {
               );
             }}
           >
-            ⇩ export jsonl
+            <FileDown size={16} /> export jsonl
           </button>
           <button
             className="btn"

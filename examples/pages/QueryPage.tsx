@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Play, Radio, Square, Timer } from "lucide-react";
 import {
   countEventsByKind,
   countEventsByPubkeys,
@@ -243,7 +244,7 @@ export function QueryPage({
             onClick={() => run()}
             title="Ctrl+Enter"
           >
-            {running ? <span className="spinner" /> : "▶"} run
+            {running ? <span className="spinner" /> : <Play size={16} />} run
           </button>
           <button
             className={`btn ${live ? "live" : ""}`}
@@ -251,7 +252,15 @@ export function QueryPage({
             onClick={toggleLive}
             title="nostr.subscribe(filters)"
           >
-            {live ? `■ live ${live.count}` : "◉ subscribe"}
+            {live ? (
+              <>
+                <Square size={16} /> live {live.count}
+              </>
+            ) : (
+              <>
+                <Radio size={16} /> subscribe
+              </>
+            )}
           </button>
           <ConfirmButton
             disabled={!ready || running}
@@ -267,7 +276,7 @@ export function QueryPage({
             disabled={!ready || running}
             onClick={runBench}
           >
-            ⏱ bench
+            <Timer size={16} /> bench
           </button>
           <input
             type="number"

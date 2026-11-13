@@ -6,6 +6,7 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
+import { Inbox, X } from "lucide-react";
 import { getEventUID, type StoredEvent } from "../../src/index.ts";
 import { track } from "../lib/activity.ts";
 import { useApp } from "../lib/app.ts";
@@ -141,7 +142,7 @@ export function ResultsView({
           onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         >
           {rows.length === 0 ? (
-            <div className="results-empty">{empty ?? "∅"}</div>
+            <div className="results-empty">{empty ?? <Inbox size={32} />}</div>
           ) : (
             <div
               style={{ height: rows.length * ROW_HEIGHT, position: "relative" }}
@@ -252,7 +253,7 @@ function EventDetail({
           copy
         </button>
         <button className="icon" title="close" onClick={onClose}>
-          ×
+          <X size={18} />
         </button>
       </div>
 

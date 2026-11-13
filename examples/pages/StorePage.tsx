@@ -1,4 +1,5 @@
 import React, { useRef, useState } from "react";
+import { Play, Square } from "lucide-react";
 import { addEvents, getEventUID, type StoredEvent } from "../../src/index.ts";
 import { validateEvent } from "../../src/lib/nostr.ts";
 import { Bars } from "../components/charts.tsx";
@@ -11,7 +12,7 @@ import {
   Stat,
 } from "../components/ui.tsx";
 import { begin } from "../lib/activity.ts";
-import { manager, pendingWrites, useDB } from "../lib/db.ts";
+import { indexEvents, manager, pendingWrites, useDB } from "../lib/db.ts";
 import {
   DEFAULT_GENERATOR,
   GENERATOR_KINDS,
@@ -90,6 +91,7 @@ export function StorePage() {
         if (method === "addEvents") await addEvents(manager.db, batch);
         else for (const e of batch) await manager.nostr.add(e);
         state.batches.push(performance.now() - t0);
+        if (method === "addEvents") indexEvents(batch);
         state.done += batch.length;
         if (kept.length < 2000)
           kept.push(...batch.slice(0, 2000 - kept.length));
@@ -192,7 +194,7 @@ export function StorePage() {
               className="btn danger"
               onClick={() => (stopRef.current = true)}
             >
-              ■ stop
+              <Square size={16} /> stop
             </button>
           ) : (
             <button
@@ -200,7 +202,7 @@ export function StorePage() {
               disabled={!ready}
               onClick={generate}
             >
-              ▶ generate & store
+              <Play size={16} /> generate & store
             </button>
           )}
         </div>

@@ -1426,3 +1426,22 @@ button.icon {
 .act-bar-fill.veryslow {
   background: var(--red);
 }
+
+/* ── Icons (lucide-react) ────────────────────────────── */
+svg.lucide {
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.btn,
+button.icon,
+.chip button,
+.fb-tabs .x,
+.activity-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.results-empty svg.lucide {
+  opacity: 0.5;
+}
