@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 6.0.0
+
 ### Cursor Pagination
 
 - Add committed-data `queryPage()`, `pages()`, and `iterate()` APIs with serializable continuation cursors, deterministic timestamp/UID ordering, both traversal directions, cancellation, and bounded page/scan sizes.
@@ -9,6 +11,7 @@
 
 ### Features
 
+- Add a worker RPC client/server through the `nostr-idb/worker` export, supporting database operations, subscriptions, pagination, and metadata.
 - Add generic event sidecar metadata with typed extraction/attachment hooks, explicit metadata on `add`, and independent `setMetadata` / `clearMetadata` operations.
 - Preserve sidecars across duplicate saves, replace them without merging, and isolate them by exact event ID across replaceable-event versions; support pending, cached, and persisted reads and updates.
 - Expose low-level sidecar writes and row-reader callbacks without requiring a database version upgrade.
@@ -41,6 +44,7 @@
 
 ### Examples
 
+- Run example databases in workers, add `@snort/worker-relay` as a comparison backend, and virtualize long lists.
 - Rebuild the example app as a browser database manager for stress testing: a visual filter builder synced with JSON, switchable query engines with benchmarking and live subscriptions, an event generator and JSON/JSONL import, multi-relay import with backfill paging, stress workloads (query storm, read+write, subscription fan-out, cold vs warm index cache), database inspection and maintenance, and an expandable activity log that times every action.
 - Add a Sync tab that compares and transfers events between the local database and relays with NIP-77 negentropy (pull, push, or both), with per-relay difference bars, transfer progress, relay rejection reasons, and a paged REQ fallback for relays without NIP-77.
 - Route example relay traffic through a shared applesauce `RelayPool`, show NIP-11 NIP-77 support and local network permission state per relay, and default typed local hosts such as `localhost:4869` to `ws://`.
