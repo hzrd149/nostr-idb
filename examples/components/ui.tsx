@@ -4,15 +4,16 @@ export function Segmented<T extends string | number>({
   value,
   options,
   onChange,
-  size,
+  wide,
 }: {
   value: T;
   options: { value: T; label: ReactNode; title?: string }[];
   onChange: (v: T) => void;
-  size?: "sm";
+  /** stretch to fill the row */
+  wide?: boolean;
 }) {
   return (
-    <div className={`segmented ${size ?? ""}`}>
+    <div className={`segmented ${wide ? "wide" : ""}`}>
       {options.map((o) => (
         <button
           key={String(o.value)}
@@ -49,35 +50,54 @@ export function NumberField({
   suffix?: string;
 }) {
   return (
-    <label className="numfield">
-      <span className="numfield-label">{label}</span>
-      <input
-        type="number"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => {
-          const n = Number(e.target.value);
-          if (!Number.isNaN(n)) onChange(n);
-        }}
-      />
-      {suffix && <span className="muted">{suffix}</span>}
-      {presets && (
-        <span className="presets">
-          {presets.map((p) => (
-            <button
-              type="button"
-              key={p}
-              className={p === value ? "on" : ""}
-              onClick={() => onChange(p)}
-            >
-              {p >= 1000 ? p / 1000 + "k" : p}
-            </button>
-          ))}
-        </span>
-      )}
-    </label>
+    <div className="field">
+      <span className="field-label">
+        {label}
+        {suffix && <span className="muted"> ({suffix})</span>}
+      </span>
+      <div className="field-control">
+        <input
+          type="number"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(e) => {
+            const n = Number(e.target.value);
+            if (!Number.isNaN(n)) onChange(n);
+          }}
+        />
+        {presets && (
+          <Segmented
+            value={value}
+            onChange={onChange}
+            options={presets.map((p) => ({ value: p, label: fmtShort(p) }))}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function fmtShort(n: number) {
+  if (n >= 1_000_000) return n / 1_000_000 + "M";
+  if (n >= 1000) return n / 1000 + "k";
+  return String(n);
+}
+
+/** A labelled block with the label above its control */
+export function Field({
+  label,
+  children,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="field">
+      <span className="field-label">{label}</span>
+      <div className="field-control">{children}</div>
+    </div>
   );
 }
 
@@ -143,38 +163,40 @@ export function ChipInput({
     setText("");
   }
   return (
-    <div className="chipinput">
-      {values.map((v) => (
-        <span className="chip" key={v}>
-          {render ? render(v) : v}
-          <button
-            type="button"
-            onClick={() => onChange(values.filter((x) => x !== v))}
-          >
-            ×
-          </button>
-        </span>
-      ))}
-      <input
-        value={text}
-        placeholder={values.length ? "" : placeholder}
-        onChange={(e) => setText(e.target.value)}
-        onPaste={(e) => {
-          const t = e.clipboardData.getData("text");
-          if (/[\s,]/.test(t.trim())) {
-            e.preventDefault();
-            commit(t);
-          }
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === "," || e.key === " ") {
-            e.preventDefault();
-            commit();
-          } else if (e.key === "Backspace" && !text && values.length)
-            onChange(values.slice(0, -1));
-        }}
-        onBlur={() => text && commit()}
-      />
+    <div className="chipinput-wrap">
+      <div className="chipinput">
+        {values.map((v) => (
+          <span className="chip" key={v}>
+            {render ? render(v) : v}
+            <button
+              type="button"
+              onClick={() => onChange(values.filter((x) => x !== v))}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          value={text}
+          placeholder={values.length ? "" : placeholder}
+          onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            const t = e.clipboardData.getData("text");
+            if (/[\s,]/.test(t.trim())) {
+              e.preventDefault();
+              commit(t);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === "," || e.key === " ") {
+              e.preventDefault();
+              commit();
+            } else if (e.key === "Backspace" && !text && values.length)
+              onChange(values.slice(0, -1));
+          }}
+          onBlur={() => text && commit()}
+        />
+      </div>
       {suggestions && (
         <span className="suggestions">
           {suggestions

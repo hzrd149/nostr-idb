@@ -10,8 +10,9 @@ import { filterSummary, fmtMs, fmtNum } from "../lib/nostr.ts";
 import { ImportSession, type ImportMode } from "../lib/relay.ts";
 
 const PRESET_RELAYS = [
-  "wss://relay.damus.io",
+  "wss://relay.ditto.pub",
   "wss://nos.lol",
+  "wss://relay.damus.io",
   "wss://relay.primal.net",
   "wss://relay.nostr.band",
   "wss://nostr.wine",
@@ -23,7 +24,9 @@ type Sink = "nostr.add" | "addEvents";
 export function ImportPage() {
   const { ready } = useDB();
   const [relays, setRelays] = useState<string[]>(PRESET_RELAYS.slice(0, 2));
-  const [filters, setFilters] = useState<Filter[]>([{ kinds: [1], limit: 500 }]);
+  const [filters, setFilters] = useState<Filter[]>([
+    { kinds: [1], limit: 500 },
+  ]);
   const [mode, setMode] = useState<ImportMode>("backfill");
   const [maxPerRelay, setMaxPerRelay] = useState(5000);
   const [sink, setSink] = useState<Sink>("addEvents");
@@ -53,10 +56,21 @@ export function ImportPage() {
         const t0 = performance.now();
         try {
           await addEvents(manager.db, batch);
-          record("store", `addEvents() × ${batch.length}`, performance.now() - t0, "from relays");
+          record(
+            "store",
+            `addEvents() × ${batch.length}`,
+            performance.now() - t0,
+            "from relays",
+          );
           setStored((s) => s + batch.length);
         } catch (e) {
-          record("store", `addEvents() × ${batch.length}`, performance.now() - t0, String(e), "error");
+          record(
+            "store",
+            `addEvents() × ${batch.length}`,
+            performance.now() - t0,
+            String(e),
+            "error",
+          );
         }
         writing = false;
       }
@@ -90,7 +104,11 @@ export function ImportPage() {
     setStored(0);
     setStartedAt(performance.now());
     setEndedAt(null);
-    const finish = begin("import", `import ${mode} from ${relays.length} relays`, filterSummary(clean));
+    const finish = begin(
+      "import",
+      `import ${mode} from ${relays.length} relays`,
+      filterSummary(clean),
+    );
     const s = new ImportSession(
       relays,
       clean,
@@ -132,12 +150,16 @@ export function ImportPage() {
         />
 
         <div className="group-title">filter</div>
-        <FilterBuilder filters={filters} onChange={setFilters} onSubmit={start} />
+        <FilterBuilder
+          filters={filters}
+          onChange={setFilters}
+          onSubmit={start}
+        />
 
         <Segmented
           value={mode}
           onChange={setMode}
-          size="sm"
+          wide
           options={[
             { value: "snapshot", label: "until EOSE" },
             { value: "backfill", label: "backfill pages" },
@@ -155,7 +177,7 @@ export function ImportPage() {
         <Segmented
           value={sink}
           onChange={setSink}
-          size="sm"
+          wide
           options={[
             { value: "addEvents", label: "addEvents() every 500ms" },
             { value: "nostr.add", label: "nostr.add() each" },
@@ -184,12 +206,18 @@ export function ImportPage() {
           <div className="run-panel">
             <div className="stats">
               <Stat label="received" value={fmtNum(total)} />
-              <Stat label="unique" value={fmtNum(session?.total ?? stored)} tone="accent" />
+              <Stat
+                label="unique"
+                value={fmtNum(session?.total ?? stored)}
+                tone="accent"
+              />
               <Stat label="stored" value={fmtNum(stored)} tone="good" />
               <Stat label="elapsed" value={fmtMs(elapsed)} />
               <Stat
                 label="events/s"
-                value={fmtNum(Math.round(total / Math.max(0.001, elapsed / 1000)))}
+                value={fmtNum(
+                  Math.round(total / Math.max(0.001, elapsed / 1000)),
+                )}
               />
             </div>
             <table className="relay-table">
@@ -209,29 +237,46 @@ export function ImportPage() {
                 {runs.map((r) => (
                   <tr key={r.url} title={r.error}>
                     <td>
-                      <span className={`status-dot ${r.status}`} title={r.status} />
+                      <span
+                        className={`status-dot ${r.status}`}
+                        title={r.status}
+                      />
                     </td>
                     <td className="mono">{r.url.replace("wss://", "")}</td>
                     <td>{fmtNum(r.received)}</td>
                     <td className="muted">{fmtNum(r.duplicates)}</td>
                     <td>{r.pages}</td>
-                    <td>{r.connectMs !== undefined ? fmtMs(r.connectMs) : "–"}</td>
-                    <td>{r.firstEoseMs !== undefined ? fmtMs(r.firstEoseMs) : "–"}</td>
+                    <td>
+                      {r.connectMs !== undefined ? fmtMs(r.connectMs) : "–"}
+                    </td>
+                    <td>
+                      {r.firstEoseMs !== undefined ? fmtMs(r.firstEoseMs) : "–"}
+                    </td>
                     <td className="muted">
-                      {r.oldest ? new Date(r.oldest * 1000).toLocaleDateString() : "–"}
+                      {r.oldest
+                        ? new Date(r.oldest * 1000).toLocaleDateString()
+                        : "–"}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {rates.length > 1 && (
-              <Bars values={rates} height={50} format={(n) => Math.round(n) + "/s"} />
+              <Bars
+                values={rates}
+                height={50}
+                format={(n) => Math.round(n) + "/s"}
+              />
             )}
           </div>
         )}
         <ResultsView
           events={feed}
-          header={feed.length ? <span>{fmtNum(feed.length)} latest imported</span> : null}
+          header={
+            feed.length ? (
+              <span>{fmtNum(feed.length)} latest imported</span>
+            ) : null
+          }
         />
       </div>
     </div>
