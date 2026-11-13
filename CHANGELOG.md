@@ -20,6 +20,7 @@
 
 ### Maintenance
 
+- Remove unused direct `esbuild` and `fake-indexeddb` development dependencies; Vite manages esbuild and browser tests use native IndexedDB.
 - Add a concise exported API overview to the README, including database helpers, cache utilities, and types.
 - Simplify the README to a package overview and pseudocode usage example; keep development and release guidance in `AGENTS.md`.
 - Instruct agents to validate and commit significant changes and new features without including unrelated work.
