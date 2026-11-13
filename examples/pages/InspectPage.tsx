@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { FileDown, Scissors } from "lucide-react";
+import { Cpu, FileDown, Scissors } from "lucide-react";
 import {
   clearDB,
   countEventsByKind,
@@ -36,7 +36,7 @@ type TagStats = { top: [string, number][]; distinct: number; total: number };
 type Timeline = { days: number[]; start: number };
 
 export function InspectPage({ active }: { active: boolean }) {
-  const { ready, generation, name } = useDB();
+  const { ready, generation, name, worker, options } = useDB();
   const { openQuery } = useApp();
   const live = useLiveStats(1000);
   const [data, setData] = useState<Data | null>(null);
@@ -46,7 +46,7 @@ export function InspectPage({ active }: { active: boolean }) {
   const [pruneTo, setPruneTo] = useState(1000);
 
   const load = useCallback(async () => {
-    if (!manager.snapshot.ready) return;
+    if (!manager.snapshot.ready || manager.snapshot.worker) return;
     const db = manager.db;
     const [kinds, authors, usedCount] = await Promise.all([
       track(
@@ -140,6 +140,31 @@ export function InspectPage({ active }: { active: boolean }) {
 
   const usagePct =
     live?.usage && live.quota ? (live.usage / live.quota) * 100 : 0;
+
+  // everything on this page reads IndexedDB or NostrIDB internals directly
+  if (worker)
+    return (
+      <div className="no-database">
+        <div className="no-database-card">
+          <h2>
+            <Cpu size={22} /> {name} runs in a worker
+          </h2>
+          <p className="muted">
+            Inspect scans IndexedDB indexes and reads NostrIDB's caches
+            directly. A worker only exposes the public API through
+            NostrIDBClient, so these tools need the database on the main thread.
+          </p>
+          <div className="btn-row">
+            <button
+              className="btn primary"
+              onClick={() => manager.reopen(name, options, false)}
+            >
+              move to main thread
+            </button>
+          </div>
+        </div>
+      </div>
+    );
 
   return (
     <div className="page inspect">

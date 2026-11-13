@@ -8,6 +8,12 @@ import type { QueryPage, QueryPageOptions } from "../database/pagination.js";
  */
 export type Features = "search";
 
+/** Options for {@link INostrIDB.subscribe} */
+export type SubscribeOptions = {
+  /** Ends the subscription when aborted, even while waiting for new events */
+  signal?: AbortSignal;
+};
+
 /**
  * Main interface for the nostr event store.
  *
@@ -66,9 +72,13 @@ export interface INostrIDB<
     options?: QueryPageOptions,
   ): AsyncGenerator<TEvent, void, undefined>;
 
-  /** Subscribe to events in the database based on filters */
+  /**
+   * Subscribe to events in the database based on filters. Aborting
+   * `options.signal` ends the subscription without throwing.
+   */
   subscribe(
     filters: Filter | Filter[],
+    options?: SubscribeOptions,
   ): AsyncGenerator<TEvent, void, undefined>;
 
   /** Delete a single event by its ID or UID */

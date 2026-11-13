@@ -47,11 +47,13 @@ async function waitForQueue() {
 }
 
 export function StorePage() {
-  const { ready } = useDB();
+  const { ready, worker } = useDB();
   const [gen, setGen] = useState<GeneratorOptions>(DEFAULT_GENERATOR);
   const [count, setCount] = useState(10_000);
   const [batchSize, setBatchSize] = useState(1000);
-  const [method, setMethod] = useState<Method>("addEvents");
+  const [chosenMethod, setMethod] = useState<Method>("addEvents");
+  // addEvents() needs the raw IndexedDB handle, which a worker keeps
+  const method: Method = worker ? "nostr.add" : chosenMethod;
   const [run, setRun] = useState<RunState | null>(null);
   const [sample, setSample] = useState<StoredEvent[]>([]);
   const [paste, setPaste] = useState("");
@@ -89,7 +91,10 @@ export function StorePage() {
         if (!batch.length) break;
         const t0 = performance.now();
         if (method === "addEvents") await addEvents(manager.db, batch);
-        else for (const e of batch) await manager.nostr.add(e);
+        else if (worker)
+          // pipeline the RPC calls; the worker batches them in its write queue
+          await Promise.all(batch.map((e) => manager.store.add(e)));
+        else for (const e of batch) await manager.store.add(e);
         state.batches.push(performance.now() - t0);
         if (method === "addEvents") indexEvents(batch);
         state.done += batch.length;
@@ -182,10 +187,14 @@ export function StorePage() {
           value={method}
           onChange={setMethod}
           wide
-          options={[
-            { value: "addEvents", label: "addEvents(db, batch)" },
-            { value: "nostr.add", label: "nostr.add(event)" },
-          ]}
+          options={
+            worker
+              ? [{ value: "nostr.add", label: "client.add(event) → worker" }]
+              : [
+                  { value: "addEvents", label: "addEvents(db, batch)" },
+                  { value: "nostr.add", label: "nostr.add(event)" },
+                ]
+          }
         />
 
         <div className="btn-row">

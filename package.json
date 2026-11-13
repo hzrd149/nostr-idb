@@ -23,6 +23,10 @@
     "./database": {
       "import": "./dist/database/index.js",
       "types": "./dist/database/index.d.ts"
+    },
+    "./worker": {
+      "import": "./dist/worker/index.js",
+      "types": "./dist/worker/index.d.ts"
     }
   },
   "scripts": {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Database, Plus, Settings, Trash2, X } from "lucide-react";
+import { Cpu, Database, Plus, Settings, Trash2, X } from "lucide-react";
 import {
   DEFAULT_OPTIONS,
   listDatabases,
@@ -7,7 +7,7 @@ import {
   useDB,
   type ExplorerOptions,
 } from "../lib/db.ts";
-import { ConfirmButton, NumberField } from "./ui.tsx";
+import { ConfirmButton, Field, NumberField, Segmented } from "./ui.tsx";
 
 /** Toggle state for a popover that closes on any outside click */
 function usePopover() {
@@ -21,6 +21,22 @@ function usePopover() {
   return [open, setOpen] as const;
 }
 
+type Thread = "main" | "worker";
+
+const THREADS: { value: Thread; label: string; title: string }[] = [
+  {
+    value: "main",
+    label: "main thread",
+    title: "NostrIDB runs on the page; every tool and stat is available",
+  },
+  {
+    value: "worker",
+    label: "worker",
+    title:
+      "NostrIDB runs in a dedicated worker behind NostrIDBClient; the page stays responsive",
+  },
+];
+
 function OptionsPopover({
   name,
   onClose,
@@ -28,8 +44,9 @@ function OptionsPopover({
   name: string;
   onClose: () => void;
 }) {
-  const { options } = useDB();
+  const { options, worker } = useDB();
   const [draft, setDraft] = useState<ExplorerOptions>(options);
+  const [thread, setThread] = useState<Thread>(worker ? "worker" : "main");
   const set = (k: keyof ExplorerOptions) => (v: number) =>
     setDraft((d) => ({ ...d, [k]: v }));
   return (
@@ -37,6 +54,9 @@ function OptionsPopover({
       <div className="popover-title">
         <Database size={16} /> {name}
       </div>
+      <Field label="thread">
+        <Segmented value={thread} options={THREADS} onChange={setThread} />
+      </Field>
       <NumberField
         label="maxEvents"
         value={draft.maxEvents}
@@ -73,7 +93,7 @@ function OptionsPopover({
         <button
           className="btn primary"
           onClick={() => {
-            manager.reopen(name, draft);
+            manager.reopen(name, draft, thread === "worker");
             onClose();
           }}
         >
@@ -100,6 +120,7 @@ function OptionsPopover({
 export function DatabasePicker({ onDone }: { onDone?: () => void }) {
   const { tabs, listVersion } = useDB();
   const [name, setName] = useState("");
+  const [thread, setThread] = useState<Thread>("main");
   const [existing, setExisting] = useState<string[] | null>(null);
 
   const refresh = useCallback(() => {
@@ -113,7 +134,7 @@ export function DatabasePicker({ onDone }: { onDone?: () => void }) {
   const exists = !!existing?.includes(trimmed);
   const submit = () => {
     if (!trimmed) return;
-    manager.open(trimmed);
+    manager.open(trimmed, thread === "worker");
     setName("");
     onDone?.();
   };
@@ -138,6 +159,9 @@ export function DatabasePicker({ onDone }: { onDone?: () => void }) {
           <Plus size={16} /> {exists ? "open" : "create"}
         </button>
       </form>
+      <Field label="run on">
+        <Segmented value={thread} options={THREADS} onChange={setThread} />
+      </Field>
 
       <div className="db-picker-label">databases in this browser</div>
       {existing === null ? (
@@ -157,7 +181,7 @@ export function DatabasePicker({ onDone }: { onDone?: () => void }) {
                 <button
                   className="btn"
                   onClick={() => {
-                    manager.open(db);
+                    manager.open(db, isOpen ? undefined : thread === "worker");
                     onDone?.();
                   }}
                 >
@@ -183,7 +207,7 @@ function DatabaseTab({ name }: { name: string }) {
   return (
     <div
       className={`db-tab ${isActive ? "on" : ""}`}
-      title={name}
+      title={manager.isWorker(name) ? `${name} · runs in a worker` : name}
       onClick={() => !isActive && manager.open(name)}
       onAuxClick={(e) => {
         if (e.button === 1) manager.close(name);
@@ -193,6 +217,13 @@ function DatabaseTab({ name }: { name: string }) {
         className={`status-dot ${isActive ? (ready ? "open" : "connecting") : ""}`}
       />
       <span className="db-tab-name">{name}</span>
+      {manager.isWorker(name) && (
+        <Cpu
+          size={16}
+          className="db-tab-worker"
+          aria-label="runs in a worker"
+        />
+      )}
       {isActive && (
         <button
           className="db-tab-icon"

@@ -1,4 +1,4 @@
-import type { Filter, NostrIDB, StoredEvent } from "../../src/index.ts";
+import type { Filter, INostrIDB, StoredEvent } from "../../src/index.ts";
 
 export const KIND_NAMES: Record<number, string> = {
   0: "profile",
@@ -146,32 +146,21 @@ export function filterSummary(filters: Filter[]) {
 }
 
 /**
- * Opens a subscription using the public NostrIDB.subscribe() async generator
- * and returns a function that closes it.
+ * Opens a subscription using the public `subscribe()` async generator and
+ * returns a function that closes it. Works with NostrIDB and NostrIDBClient.
  */
 export function openSubscription(
-  nostr: NostrIDB,
+  store: INostrIDB,
   filters: Filter[],
   onEvent: (event: StoredEvent) => void,
 ) {
-  const before = new Set(nostr.subscriptions.keys());
-  const iterator = nostr.subscribe(filters);
-  let closed = false;
-
-  // the generator body (and the internal subscription) starts on the first next()
-  const pump = async () => {
-    for (;;) {
-      const r = await iterator.next();
-      if (r.done || closed) return;
-      onEvent(r.value);
-    }
-  };
-  pump();
-  const id = [...nostr.subscriptions.keys()].find((k) => !before.has(k));
-
-  return () => {
-    closed = true;
-    // closing the internal subscription completes the generator
-    if (id) nostr.subscriptions.get(id)?.close();
-  };
+  // aborting ends the generator even while it waits for new events
+  const controller = new AbortController();
+  (async () => {
+    for await (const event of store.subscribe(filters, {
+      signal: controller.signal,
+    }))
+      onEvent(event);
+  })().catch(() => {});
+  return () => controller.abort();
 }

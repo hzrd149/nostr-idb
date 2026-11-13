@@ -1,7 +1,7 @@
 import type { IAsyncEventStoreRead, SyncPair } from "applesauce-core";
 import type { NostrEvent as ApplesauceEvent } from "applesauce-core/helpers";
 import type { Filter as ApplesauceFilter } from "applesauce-core/helpers";
-import type { Filter, NostrIDB, StoredEvent } from "../../src/index.ts";
+import type { Filter, INostrIDB, StoredEvent } from "../../src/index.ts";
 
 type Event = ApplesauceEvent;
 
@@ -19,7 +19,7 @@ export class IdbSyncStore implements IAsyncEventStoreRead<Event> {
   /** Called once per distinct filter with how long the inventory read took */
   onInventory?: (filter: Filter, pairs: number, ms: number) => void;
 
-  constructor(private nostr: NostrIDB) {}
+  constructor(private nostr: INostrIDB) {}
 
   private remember(events: StoredEvent[]) {
     for (const e of events) this.byId.set(e.id, e);

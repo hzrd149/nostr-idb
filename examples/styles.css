@@ -476,6 +476,10 @@ button.icon {
   border-color: var(--accent);
   cursor: default;
 }
+.db-tab-worker {
+  color: var(--blue);
+  flex-shrink: 0;
+}
 .db-tab-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -629,6 +633,9 @@ button.icon {
 }
 .header-stats .warn b {
   color: var(--yellow);
+}
+.header-stats .bad b {
+  color: var(--red);
 }
 
 .nav {

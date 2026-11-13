@@ -44,14 +44,15 @@ type Sample = {
 
 /** Read a slice of the database to build realistic random filters */
 async function loadSample(): Promise<Sample> {
-  const rows = await manager.db.getAll("events", null, 2000);
+  // the public API works on either thread; a limit-only filter returns the newest
+  const events = await manager.store.query({ limit: 2000 });
   const kinds = new Set<number>();
   const authors = new Set<string>();
   const tags: [string, string][] = [];
   const tagPairs: [string, string, string][] = [];
   let minTime = Infinity;
   let maxTime = 0;
-  for (const { event } of rows) {
+  for (const event of events) {
     kinds.add(event.kind);
     authors.add(event.pubkey);
     minTime = Math.min(minTime, event.created_at);
@@ -65,7 +66,7 @@ async function loadSample(): Promise<Sample> {
       if (values.length >= 2 && values[0] !== values[1])
         tagPairs.push([name, values[0], values[1]]);
   }
-  if (!rows.length)
+  if (!events.length)
     throw new Error("Database is empty — store some events first");
   return {
     kinds: [...kinds],
@@ -139,8 +140,11 @@ type Result = {
 type Workload = "storm" | "mixed" | "subs" | "cache";
 
 export function StressPage() {
-  const { ready } = useDB();
-  const [workload, setWorkload] = useState<Workload>("storm");
+  const { ready, worker } = useDB();
+  const [chosenWorkload, setWorkload] = useState<Workload>("storm");
+  // the cache workload clears NostrIDB's index cache, which a worker keeps
+  const workload: Workload =
+    worker && chosenWorkload === "cache" ? "storm" : chosenWorkload;
   const [queries, setQueries] = useState(500);
   const [concurrency, setConcurrency] = useState(8);
   const [engine, setEngine] = useState<Engine>("query");
@@ -330,10 +334,16 @@ export function StressPage() {
               gen.next,
             );
             const w0 = performance.now();
-            for (const e of batch) await manager.nostr.add(e);
-            // measure until the write queue has flushed the batch to IndexedDB
-            while (pendingWrites(manager.nostr) > 0)
-              await new Promise((r) => setTimeout(r, 5));
+            if (manager.snapshot.worker) {
+              // a worker's write queue is not visible here, so this measures
+              // until the worker has accepted the batch
+              await Promise.all(batch.map((e) => manager.store.add(e)));
+            } else {
+              for (const e of batch) await manager.nostr.add(e);
+              // measure until the write queue has flushed the batch to IndexedDB
+              while (pendingWrites(manager.nostr) > 0)
+                await new Promise((r) => setTimeout(r, 5));
+            }
             const ms = performance.now() - w0;
             wLat.push(ms);
             wPoints.push([w0 - t0 + ms, ms]);
@@ -382,7 +392,7 @@ export function StressPage() {
         const addAll = async (n: number) => {
           const t0 = performance.now();
           for (let i = 0; i < n && !stopRef.current; i++)
-            await manager.nostr.add(make());
+            await manager.store.add(make());
           return performance.now() - t0;
         };
 
@@ -398,7 +408,7 @@ export function StressPage() {
         );
         subFilters.forEach((f, i) =>
           closers.push(
-            openSubscription(manager.nostr, [f], () => {
+            openSubscription(manager.store, [f], () => {
               deliveries++;
               perSub[i]++;
             }),
@@ -537,7 +547,7 @@ export function StressPage() {
             { value: "storm", label: "query storm" },
             { value: "mixed", label: "read+write" },
             { value: "subs", label: "subs" },
-            { value: "cache", label: "cache" },
+            ...(worker ? [] : [{ value: "cache" as const, label: "cache" }]),
           ]}
         />
 

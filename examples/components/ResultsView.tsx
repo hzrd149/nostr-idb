@@ -202,7 +202,7 @@ function EventDetail({
   onDeleted: (uid: string) => void;
 }) {
   const { openQuery } = useApp();
-  const { db, nostr } = useDB();
+  const { db, nostr, worker } = useDB();
   const uid = getEventUID(event);
   const [stored, setStored] = useState<{
     tags?: string[];
@@ -325,7 +325,12 @@ function EventDetail({
 
           <div className="stored">
             <div className="stored-title">IndexedDB record</div>
-            {stored === null ? (
+            {worker ? (
+              <span className="muted">
+                inside the worker; switch this database to the main thread to
+                inspect raw records
+              </span>
+            ) : stored === null ? (
               <span className="spinner" />
             ) : stored.missing ? (
               <span className="bad">not stored</span>
@@ -368,7 +373,7 @@ function EventDetail({
             await track(
               "delete",
               `deleteEvent(${shortHex(uid, 12)})`,
-              () => manager.nostr.deleteEvent(uid),
+              () => manager.store.deleteEvent(uid),
               (ok) => (ok ? "deleted" : "not found"),
             );
             onDeleted(uid);

@@ -74,7 +74,7 @@ instrumentation itself adds overhead.
 | `replaceable(kind, author, identifier?)`       | Get the latest replaceable event.                                  |
 | `query(filters)`                               | Return matching events as an array.                                |
 | `count(filters)`                               | Count matching events.                                             |
-| `subscribe(filters)`                           | Async generator of stored and newly added events.                  |
+| `subscribe(filters, { signal }?)`              | Async generator of stored and newly added events.                  |
 | `supports()`                                   | Return supported optional feature names.                           |
 | `deleteEvent(id)`                              | Delete an event by ID or UID.                                      |
 | `deleteReplaceable(pubkey, kind, identifier?)` | Delete a replaceable event.                                        |
@@ -216,6 +216,59 @@ sidecars; an explicit `undefined` entry clears one.
 callback receiving `{ event, tags, metadata? }` to restore metadata onto returned
 events. Low-level writes do not synchronize `NostrIDB` caches.
 
+### Running in a worker
+
+`nostr-idb/worker` runs a database in a dedicated worker so IndexedDB reads,
+index building and filter matching stay off the main thread. The worker serves
+one `NostrIDB` with `serveNostrIDB`; the page talks to it through
+`NostrIDBClient`, which implements `INostrIDB`, so code written against
+`INostrIDB` works with either.
+
+```ts
+// db-worker.ts
+import { NostrIDB, openDB } from "nostr-idb";
+import { serveNostrIDB } from "nostr-idb/worker";
+
+serveNostrIDB(self, new NostrIDB(await openDB("my-app")));
+```
+
+```ts
+// main thread
+import { NostrIDBClient } from "nostr-idb/worker";
+
+const worker = new Worker(new URL("./db-worker.ts", import.meta.url), {
+  type: "module",
+});
+const db = new NostrIDBClient(worker);
+
+await db.add(event);
+const notes = await db.query({ kinds: [1], limit: 20 });
+
+const controller = new AbortController();
+for await (const note of db.subscribe(
+  { kinds: [1] },
+  { signal: controller.signal },
+)) {
+  display(note);
+}
+```
+
+- Any `postMessage` endpoint works: a `Worker`, `self` inside one, or a
+  `MessagePort`. Calls made before the server is listening wait for it, so the
+  worker can open the database asynchronously.
+- `pages()` pulls one page per round trip; `iterate()` is built on it.
+  `subscribe()` pushes events as they arrive. Aborting a `signal` cancels the
+  stream on the server too, including an idle subscription.
+- Events are structured clones: symbol properties are dropped. To carry sidecar
+  metadata, create the worker's `NostrIDB` with `metadata: serverMetadata` and
+  pass your `read`/`attach` hooks to `new NostrIDBClient(worker, { metadata })`.
+- Only the `INostrIDB` API crosses the boundary. Low-level helpers that take the
+  raw database handle, and instance internals such as `indexCache`, must run
+  inside the worker.
+- `client.close()` rejects pending calls but leaves the worker running.
+  `stop()` does not flush queued writes, so before terminating the worker, call
+  `await nostr.writeQueue?.flush(Infinity)` inside it.
+
 ### Other exports
 
 All database helpers are available from both `nostr-idb` and `nostr-idb/database`.
@@ -233,7 +286,7 @@ All database helpers are available from both `nostr-idb` and `nostr-idb/database
 | `IndexCache`, `WriteQueue`                                        | Low-level cache and batched-write utilities (root export only).    |
 
 **Types:** `NostrEvent`, `UnsignedEvent`, `RumorEvent`, `StoredEvent`,
-`EventTemplate`, `Filter`, `INostrIDB`, `NostrDBOptions`, `Features`,
+`EventTemplate`, `Filter`, `INostrIDB`, `SubscribeOptions`, `NostrDBOptions`, `Features`,
 `NostrIDBDatabase`, `Schema`, `EventMetadataOptions`, and `EventReader`. Subscription implementation types
 `InternalSubscription` and `InternalSubscriptionFor` are also exported.
 

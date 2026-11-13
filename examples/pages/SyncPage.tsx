@@ -139,7 +139,7 @@ export function SyncPage() {
       filterSummary([filter]),
     );
 
-    const store = new IdbSyncStore(manager.nostr);
+    const store = new IdbSyncStore(manager.store);
     store.onInventory = (_f, n, ms) => {
       s.local = n;
       s.inventoryMs = ms;

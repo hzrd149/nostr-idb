@@ -14,6 +14,7 @@ import { ActivityLog } from "./components/ActivityLog.tsx";
 import { DatabasePicker, DatabaseTabs } from "./components/DatabaseTabs.tsx";
 import { AppCtx, type Tab } from "./lib/app.ts";
 import { manager, useDB, useLiveStats } from "./lib/db.ts";
+import { useFrameLag } from "./lib/lag.ts";
 import { fmtBytes, fmtNum } from "./lib/nostr.ts";
 import { ImportPage } from "./pages/ImportPage.tsx";
 import { InspectPage } from "./pages/InspectPage.tsx";
@@ -33,37 +34,61 @@ const TABS: { tab: Tab; icon: LucideIcon; label: string; key: string }[] = [
 
 function Header() {
   const stats = useLiveStats(1000);
+  const { worker } = useDB();
+  const lag = useFrameLag();
 
   return (
     <header className="header">
       <span className="logo">nostr-idb</span>
       <DatabaseTabs />
       <span style={{ flex: 1 }} />
-      {stats && (
-        <span className="header-stats">
-          <span title="events in IndexedDB">
-            <b>{fmtNum(stats.events)}</b> events
-          </span>
-          <span
-            title="events waiting in the write queue"
-            className={stats.pendingWrites ? "warn" : ""}
-          >
-            <b>{fmtNum(stats.pendingWrites)}</b> queued
-          </span>
-          <span title="indexes in the in-memory index cache">
-            <b>{fmtNum(stats.cachedIndexes)}</b> indexes
-          </span>
-          <span title="events held in memory">
-            <b>{fmtNum(stats.memoryEvents)}</b> in memory
-          </span>
-          <span title="open subscriptions">
-            <b>{stats.subscriptions}</b> subs
-          </span>
-          <span title="origin storage usage">
-            <b>{fmtBytes(stats.usage)}</b>
-          </span>
+      <span className="header-stats">
+        {stats && (
+          <>
+            <span title="events in IndexedDB">
+              <b>{fmtNum(stats.events)}</b> events
+            </span>
+            {/* NostrIDB internals are only readable on the main thread */}
+            {stats.pendingWrites !== undefined && (
+              <span
+                title="events waiting in the write queue"
+                className={stats.pendingWrites ? "warn" : ""}
+              >
+                <b>{fmtNum(stats.pendingWrites)}</b> queued
+              </span>
+            )}
+            {stats.cachedIndexes !== undefined && (
+              <span title="indexes in the in-memory index cache">
+                <b>{fmtNum(stats.cachedIndexes)}</b> indexes
+              </span>
+            )}
+            {stats.memoryEvents !== undefined && (
+              <span title="events held in memory">
+                <b>{fmtNum(stats.memoryEvents)}</b> in memory
+              </span>
+            )}
+            {stats.subscriptions !== undefined && (
+              <span title="open subscriptions">
+                <b>{stats.subscriptions}</b> subs
+              </span>
+            )}
+            <span title="origin storage usage">
+              <b>{fmtBytes(stats.usage)}</b>
+            </span>
+          </>
+        )}
+        <span
+          title={
+            "Longest gap between frames in the last second. " +
+            (worker
+              ? "This database runs in a worker, so its work does not block the page."
+              : "This database runs on the main thread, so heavy work stalls the page.")
+          }
+          className={lag > 200 ? "bad" : lag > 50 ? "warn" : ""}
+        >
+          <b>{lag}ms</b> UI lag
         </span>
-      )}
+      </span>
     </header>
   );
 }

@@ -5,10 +5,12 @@ import {
   countEvents,
   deleteDB,
   openDB,
+  type INostrIDB,
   type NostrDBOptions,
   type NostrIDBDatabase,
   type StoredEvent,
 } from "../../src/index.ts";
+import { NostrIDBClient } from "../../src/worker/index.ts";
 import { track } from "./activity.ts";
 
 export type ExplorerOptions = Required<
@@ -37,7 +39,16 @@ export type DBSnapshot = {
   /** name of the active database, empty when no database is open */
   name: string;
   options: ExplorerOptions;
+  /** whether the active database runs in a dedicated worker */
+  worker: boolean;
+  /**
+   * The public database API: the NostrIDB instance itself on the main
+   * thread, or a NostrIDBClient talking to a worker
+   */
+  store: INostrIDB | null;
+  /** raw IndexedDB handle, only available on the main thread */
   db: NostrIDBDatabase | null;
+  /** NostrIDB internals (caches, queues), only available on the main thread */
   nostr: NostrIDB | null;
   ready: boolean;
   /** increments whenever the active database is swapped */
@@ -52,9 +63,56 @@ type Saved = {
   tabs: string[];
   active: string;
   options: Record<string, ExplorerOptions>;
+  /** databases that run in a dedicated worker */
+  workers?: Record<string, boolean>;
 };
 
-type Connection = { db: NostrIDBDatabase; nostr: NostrIDB };
+type Connection =
+  | { kind: "main"; store: NostrIDB; db: NostrIDBDatabase; nostr: NostrIDB }
+  | { kind: "worker"; store: NostrIDBClient; worker: Worker };
+
+/** Starts a dedicated worker serving one database, see db-worker.ts */
+async function startWorker(name: string, options: ExplorerOptions) {
+  const worker = new Worker(new URL("./db-worker.ts", import.meta.url), {
+    type: "module",
+    name: `nostr-idb: ${name}`,
+  });
+  const failed = new Promise<never>((_, reject) =>
+    worker.addEventListener("error", (e) =>
+      reject(new Error(e.message || "Worker failed to start")),
+    ),
+  );
+  worker.postMessage({ type: "open", name, options });
+  const store = new NostrIDBClient(worker);
+  try {
+    await Promise.race([store.ready, failed]);
+  } catch (error) {
+    store.close();
+    worker.terminate();
+    throw error;
+  }
+  return { kind: "worker" as const, store, worker };
+}
+
+/** Flushes and closes the worker's database, then terminates it */
+async function stopWorker({
+  store,
+  worker,
+}: {
+  store: NostrIDBClient;
+  worker: Worker;
+}) {
+  store.close();
+  const closed = new Promise<void>((resolve) => {
+    worker.addEventListener("message", (e) => {
+      if (e.data?.type === "closed") resolve();
+    });
+    setTimeout(resolve, 5000);
+  });
+  worker.postMessage({ type: "shutdown" });
+  await closed;
+  worker.terminate();
+}
 
 function loadSaved(): Saved {
   try {
@@ -65,15 +123,17 @@ function loadSaved(): Saved {
         tabs: [saved.name],
         active: saved.name,
         options: { [saved.name]: { ...DEFAULT_OPTIONS, ...saved.options } },
+        workers: {},
       };
     const tabs: string[] = Array.isArray(saved.tabs) ? saved.tabs : [];
     return {
       tabs,
       active: tabs.includes(saved.active) ? saved.active : (tabs[0] ?? ""),
       options: saved.options ?? {},
+      workers: saved.workers ?? {},
     };
   } catch {
-    return { tabs: [], active: "", options: {} };
+    return { tabs: [], active: "", options: {}, workers: {} };
   }
 }
 
@@ -102,6 +162,8 @@ class DBManager {
     this.snapshot = {
       name: this.saved.active,
       options: this.optionsFor(this.saved.active),
+      worker: this.isWorker(this.saved.active),
+      store: null,
       db: null,
       nostr: null,
       ready: false,
@@ -115,6 +177,11 @@ class DBManager {
     return { ...DEFAULT_OPTIONS, ...this.saved.options[name] };
   }
 
+  /** whether a database is set to run in a worker */
+  isWorker(name: string) {
+    return !!this.saved.workers?.[name];
+  }
+
   private persist() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(this.saved));
   }
@@ -123,12 +190,14 @@ class DBManager {
     const name = this.saved.active;
     const conn = this.connections.get(name);
     const swapped =
-      name !== this.snapshot.name || conn?.db !== this.snapshot.db;
+      name !== this.snapshot.name || conn?.store !== this.snapshot.store;
     this.snapshot = {
       name,
       options: this.optionsFor(name),
-      db: conn?.db ?? null,
-      nostr: conn?.nostr ?? null,
+      worker: conn ? conn.kind === "worker" : this.isWorker(name),
+      store: conn?.store ?? null,
+      db: conn?.kind === "main" ? conn.db : null,
+      nostr: conn?.kind === "main" ? conn.nostr : null,
       ready: !!conn,
       generation: this.snapshot.generation + (swapped ? 1 : 0),
       tabs: this.saved.tabs,
@@ -143,12 +212,20 @@ class DBManager {
     return () => this.listeners.delete(listener);
   };
 
-  /** the active db, throws if not ready */
+  /** the active database's public API, throws if not ready */
+  get store() {
+    if (!this.snapshot.store) throw new Error("Database not open");
+    return this.snapshot.store;
+  }
+  /** the active raw IndexedDB handle, throws if not ready or in a worker */
   get db() {
+    if (this.snapshot.worker) throw new Error("Database runs in a worker");
     if (!this.snapshot.db) throw new Error("Database not open");
     return this.snapshot.db;
   }
+  /** the active NostrIDB instance, throws if not ready or in a worker */
   get nostr() {
+    if (this.snapshot.worker) throw new Error("Database runs in a worker");
     if (!this.snapshot.nostr) throw new Error("Database not open");
     return this.snapshot.nostr;
   }
@@ -158,14 +235,22 @@ class DBManager {
     if (existing) return Promise.resolve(existing);
     let pending = this.pending.get(name);
     if (!pending) {
-      pending = track(
-        "db",
-        `openDB("${name}")`,
-        () => openDB(name),
-        (db) => `v${db.version}`,
-      )
-        .then((db) => {
-          const conn = { db, nostr: new NostrIDB(db, this.optionsFor(name)) };
+      const options = this.optionsFor(name);
+      const connecting: Promise<Connection> = this.isWorker(name)
+        ? track("db", `new Worker() → openDB("${name}")`, () =>
+            startWorker(name, options),
+          )
+        : track(
+            "db",
+            `openDB("${name}")`,
+            () => openDB(name),
+            (db) => `v${db.version}`,
+          ).then((db) => {
+            const nostr = new NostrIDB(db, options);
+            return { kind: "main", store: nostr, db, nostr };
+          });
+      pending = connecting
+        .then((conn) => {
           this.connections.set(name, conn);
           return conn;
         })
@@ -180,6 +265,7 @@ class DBManager {
     const conn = this.connections.get(name);
     if (!conn) return;
     this.connections.delete(name);
+    if (conn.kind === "worker") return stopWorker(conn);
     await conn.nostr.stop();
     conn.db.close();
   }
@@ -189,10 +275,18 @@ class DBManager {
     if (this.saved.active) await this.open(this.saved.active);
   }
 
-  /** Open a database as a tab (creating it if needed) and make it active */
-  async open(name: string) {
+  /**
+   * Open a database as a tab (creating it if needed) and make it active.
+   * `worker` picks the thread for a database that is not already open.
+   */
+  async open(name: string, worker?: boolean) {
     name = name.trim();
     if (!name) return;
+    if (worker !== undefined && !this.connections.has(name))
+      this.saved = {
+        ...this.saved,
+        workers: { ...this.saved.workers, [name]: worker },
+      };
     if (!this.saved.tabs.includes(name))
       this.saved = { ...this.saved, tabs: [...this.saved.tabs, name] };
     this.saved = { ...this.saved, active: name };
@@ -223,17 +317,19 @@ class DBManager {
   async remove(name: string) {
     await this.close(name);
     const { [name]: _, ...options } = this.saved.options;
-    this.saved = { ...this.saved, options };
+    const { [name]: __, ...workers } = this.saved.workers ?? {};
+    this.saved = { ...this.saved, options, workers };
     this.persist();
     await track("db", `deleteDB("${name}")`, () => deleteDB(name));
     this.emit(true);
   }
 
   /** Change a database's options and reconnect it */
-  async reopen(name: string, options: ExplorerOptions) {
+  async reopen(name: string, options: ExplorerOptions, worker: boolean) {
     this.saved = {
       ...this.saved,
       options: { ...this.saved.options, [name]: options },
+      workers: { ...this.saved.workers, [name]: worker },
     };
     await this.disconnect(name);
     this.emit();
@@ -259,10 +355,11 @@ export function useDB() {
 
 export type LiveStats = {
   events: number;
-  pendingWrites: number;
-  cachedIndexes: number;
-  memoryEvents: number;
-  subscriptions: number;
+  /** main-thread only stats read from NostrIDB internals */
+  pendingWrites?: number;
+  cachedIndexes?: number;
+  memoryEvents?: number;
+  subscriptions?: number;
   usage?: number;
   quota?: number;
 };
@@ -279,29 +376,30 @@ export function pendingWrites(nostr: NostrIDB) {
 
 /** Polls cheap stats from the database */
 export function useLiveStats(interval = 1000): LiveStats | null {
-  const { db, nostr } = useDB();
+  const { store, db, nostr } = useDB();
   const [stats, setStats] = useState<LiveStats | null>(null);
 
   useEffect(() => {
     setStats(null);
-    if (!db || !nostr) return;
+    if (!store) return;
     let stop = false;
     let tick = 0;
     let storage: { usage?: number; quota?: number } = {};
 
     async function poll() {
-      if (stop || !db || !nostr) return;
+      if (stop || !store) return;
       try {
         if (tick++ % 5 === 0 && navigator.storage?.estimate)
           storage = await navigator.storage.estimate();
-        const events = await countEvents(db);
+        // a worker only exposes the public API, so count through it
+        const events = db ? await countEvents(db) : await store.count({});
         if (stop) return;
         setStats({
           events,
-          pendingWrites: pendingWrites(nostr),
-          cachedIndexes: nostr.indexCache.count,
-          memoryEvents: nostr.eventMap.size,
-          subscriptions: nostr.subscriptions.size,
+          pendingWrites: nostr ? pendingWrites(nostr) : undefined,
+          cachedIndexes: nostr?.indexCache.count,
+          memoryEvents: nostr?.eventMap.size,
+          subscriptions: nostr?.subscriptions.size,
           usage: storage.usage,
           quota: storage.quota,
         });
@@ -314,7 +412,7 @@ export function useLiveStats(interval = 1000): LiveStats | null {
     return () => {
       stop = true;
     };
-  }, [db, nostr, interval]);
+  }, [store, db, nostr, interval]);
 
   return stats;
 }
@@ -328,8 +426,17 @@ export function indexEvents(events: StoredEvent[]) {
   if (cache) for (const e of events) cache.addEventToIndexes(e);
 }
 
-/** Batch write events with `addEvents()` and update the index cache */
+/**
+ * Batch write events with `addEvents()` and update the index cache. A
+ * database in a worker has no raw handle, so its events go through `add()`
+ * (messages are pipelined, and the worker batches them in its write queue).
+ */
 export async function writeEvents(events: StoredEvent[]) {
+  if (manager.snapshot.worker) {
+    const store = manager.store;
+    await Promise.all(events.map((e) => store.add(e)));
+    return;
+  }
   await addEvents(manager.db, events);
   indexEvents(events);
 }

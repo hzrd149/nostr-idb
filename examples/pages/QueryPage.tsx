@@ -41,7 +41,7 @@ export function QueryPage({
   request: { filters: Filter[]; nonce: number } | null;
   active: boolean;
 }) {
-  const { ready, generation } = useDB();
+  const { ready, generation, worker } = useDB();
   const [filters, setFilters] = useState<Filter[]>([
     { kinds: [1], limit: 100 },
   ]);
@@ -64,6 +64,8 @@ export function QueryPage({
   // load suggestions from the database
   const loadHints = useCallback(async () => {
     if (!manager.snapshot.ready) return;
+    // the kind/author scans read IndexedDB directly, which a worker keeps
+    if (manager.snapshot.worker) return setHints(undefined);
     const [kinds, authors] = await Promise.all([
       track(
         "query",
@@ -146,7 +148,7 @@ export function QueryPage({
     setBench({ times, cold });
     try {
       for (let i = 0; i < benchN; i++) {
-        if (cold) manager.nostr.indexCache.clear();
+        if (cold && !manager.snapshot.worker) manager.nostr.indexCache.clear();
         const t0 = performance.now();
         await runEngine(engine, clean);
         times.push(performance.now() - t0);
@@ -182,7 +184,7 @@ export function QueryPage({
     let count = 0;
     let flush: ReturnType<typeof setTimeout> | undefined;
     setResults([]);
-    const close = openSubscription(manager.nostr, clean, (event) => {
+    const close = openSubscription(manager.store, clean, (event) => {
       const uid = getEventUID(event);
       if (seen.has(uid)) return;
       seen.add(uid);
@@ -215,7 +217,7 @@ export function QueryPage({
     await track(
       "delete",
       "nostr.deleteByFilters()",
-      () => manager.nostr.deleteByFilters(clean),
+      () => manager.store.deleteByFilters(clean),
       (n) => `${n} deleted`,
       filterSummary(clean),
     );
@@ -285,10 +287,18 @@ export function QueryPage({
             onChange={(e) => setBenchN(Math.max(1, Number(e.target.value)))}
           />
           <span className="muted">×</span>
-          <label className="check">
+          <label
+            className="check"
+            title={
+              worker
+                ? "the index cache lives in the worker; main thread only"
+                : "clear the index cache before every run"
+            }
+          >
             <input
               type="checkbox"
-              checked={cold}
+              checked={cold && !worker}
+              disabled={worker}
               onChange={(e) => setCold(e.target.checked)}
             />
             cold cache

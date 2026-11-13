@@ -28,7 +28,7 @@ import type { EventMetadataOptions } from "./metadata.js";
 import { logger, startTimer } from "../debug.js";
 import { nanoid } from "../lib/nanoid.js";
 import { selectEventsForFilters } from "../utils.js";
-import { type INostrIDB } from "./interface.js";
+import { type INostrIDB, type SubscribeOptions } from "./interface.js";
 import { openDB } from "../database/database.js";
 import {
   getEventsPage,
@@ -433,10 +433,17 @@ export class NostrIDB<
     );
   }
 
-  /** Subscribe to events in the database based on filters */
+  /**
+   * Subscribe to events in the database based on filters. Aborting
+   * `options.signal` ends the subscription promptly, even while it is waiting
+   * for new events, without throwing.
+   */
   async *subscribe(
     filters: Filter | Filter[],
+    options: SubscribeOptions = {},
   ): AsyncGenerator<TEvent, void, undefined> {
+    const { signal } = options;
+    if (signal?.aborted) return;
     const f = Array.isArray(filters) ? filters : [filters];
     this.warnUnboundedQuery(f);
 
@@ -468,18 +475,30 @@ export class NostrIDB<
       },
     });
 
+    const onAbort = () => {
+      done = true;
+      if (notify) {
+        const fn = notify;
+        notify = null;
+        fn();
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+
     try {
-      while (true) {
-        while (queue.length > 0) {
+      while (!signal?.aborted) {
+        if (queue.length > 0) {
           yield queue.shift()!;
+          continue;
         }
         if (done) break;
-        // Wait for the next event or completion signal
+        // Wait for the next event, completion, or abort
         await new Promise<void>((resolve) => {
           notify = resolve;
         });
       }
     } finally {
+      signal?.removeEventListener("abort", onAbort);
       sub.close();
     }
   }

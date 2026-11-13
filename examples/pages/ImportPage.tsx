@@ -110,7 +110,7 @@ export function ImportPage() {
         perSecond.current++;
         feedRef.current.push(event);
         if (sink === "nostr.add") {
-          manager.nostr.add(event);
+          manager.store.add(event);
           setStored((n) => n + 1);
         } else bufferRef.current.push(event);
       },
