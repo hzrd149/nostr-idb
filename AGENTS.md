@@ -57,13 +57,43 @@ no Node-based `fake-indexeddb` polyfill. `src/__tests__/setup.ts` is intentional
 
 ---
 
+## Development and CI
+
+The locked Nix flake provides Node.js 24, pnpm 10, and Chromium on Linux:
+
+```sh
+nix develop
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test:run --browser.headless
+```
+
+Nix supplies Chromium through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; outside
+the Nix shell, Vitest uses Playwright's installed browser as usual.
+
+Nostr CI runs `.ngit/act/workflows/test.yml` on pushes and pull requests.
+For coordinators requiring a service request, enable the repository with
+`ngit ci request <coordinator-npub> --json` after publishing the workflow. Check results with
+`ngit ci status <commit> --json`.
+
+---
+
 ## Changelog and Releases
 
 - After making significant changes or adding features, validate the work and create a descriptive commit containing only the changes for that task; leave unrelated work untouched.
 - Record every change as an item under `Unreleased` in `CHANGELOG.md`, grouped under descriptive headings.
 - Bump the package version only when explicitly asked to cut a release.
 - Releases are manual: bump `package.json`, finalize the changelog into a versioned section while leaving a fresh `Unreleased` section, build and test, commit, create an annotated `vX.Y.Z` tag, push the commit and tag, then run `pnpm publish`.
-- See `README.md` for the release checklist. Do not tag, push, or publish unless requested.
+- Do not tag, push, or publish unless requested.
+
+Release checklist (start from a clean working tree with all intended changes committed):
+
+1. Bump `version` in `package.json` to the next semantic version.
+2. Finalize the `Unreleased` notes under a heading matching that version, and leave a new, empty `Unreleased` section at the top.
+3. Run `pnpm install --frozen-lockfile`, `pnpm build`, and `pnpm test:run --browser.headless`.
+4. Commit the version bump and changelog, then create an annotated Git tag matching the package version (for example, `git tag -a vX.Y.Z -m "vX.Y.Z"`).
+5. Push the release commit and tag to the Git repository (and any maintained mirrors).
+6. Publish the built package to npm with `pnpm publish`.
 
 ---
 

@@ -20,6 +20,8 @@
 
 ### Maintenance
 
+- Add a concise exported API overview to the README, including database helpers, cache utilities, and types.
+- Simplify the README to a package overview and pseudocode usage example; keep development and release guidance in `AGENTS.md`.
 - Instruct agents to validate and commit significant changes and new features without including unrelated work.
 - Update Vitest browser and coverage packages to 4.1.12 to address critical browser-mode and moderate mocker vulnerabilities.
 - Remove unused Svelte development dependencies and configuration from the React-based examples setup.
