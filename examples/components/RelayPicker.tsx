@@ -1,5 +1,11 @@
 import React from "react";
-import { PRESET_RELAYS, useRelayState } from "../lib/pool.ts";
+import {
+  PRESET_RELAYS,
+  isLoopbackRelay,
+  parseRelayInput,
+  useLocalNetworkPermission,
+  useRelayState,
+} from "../lib/pool.ts";
 import { ChipInput } from "./ui.tsx";
 
 function shortUrl(url: string) {
@@ -16,6 +22,11 @@ export function RelayLabel({
 }) {
   const { status, supported } = useRelayState(url);
   const nip77 = supported?.includes(77);
+  const loopback = isLoopbackRelay(url);
+  // only public https pages need the local network permission
+  const lna = useLocalNetworkPermission(
+    loopback && location.protocol === "https:",
+  );
   return (
     <span className="relay-label">
       <span
@@ -23,6 +34,14 @@ export function RelayLabel({
         title={status?.ready ? "connected" : "idle"}
       />
       {shortUrl(url)}
+      {lna && lna !== "unsupported" && (
+        <span
+          className={`nip-badge ${lna === "granted" ? "yes" : lna === "denied" ? "no" : "pending"}`}
+          title={`local network access: ${lna}`}
+        >
+          local
+        </span>
+      )}
       {showNip77 && (
         <span
           className={`nip-badge ${supported === undefined ? "" : nip77 ? "yes" : "no"}`}
@@ -48,7 +67,7 @@ export function RelayPicker({
     <ChipInput
       values={relays}
       onChange={onChange}
-      parse={(s) => (/^wss?:\/\//.test(s) ? s : s ? "wss://" + s : null)}
+      parse={parseRelayInput}
       render={(url) => <RelayLabel url={url} showNip77={showNip77} />}
       suggestions={PRESET_RELAYS.map((r) => ({
         value: r,

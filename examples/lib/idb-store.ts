@@ -56,6 +56,11 @@ export class IdbSyncStore implements IAsyncEventStoreRead<Event> {
     return this.remember(await this.nostr.query(list));
   }
 
+  /** Whether an event id is in the inventories loaded so far */
+  has(id: string) {
+    return this.byId.has(id);
+  }
+
   getTimeline(filters: ApplesauceFilter | ApplesauceFilter[]) {
     return this.getByFilters(filters);
   }

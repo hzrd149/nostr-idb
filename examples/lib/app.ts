@@ -1,13 +1,7 @@
 import { createContext, useContext } from "react";
 import type { Filter } from "../../src/index.ts";
 
-export type Tab =
-  | "query"
-  | "store"
-  | "import"
-  | "sync"
-  | "stress"
-  | "inspect";
+export type Tab = "query" | "store" | "import" | "sync" | "stress" | "inspect";
 
 export type AppContext = {
   tab: Tab;

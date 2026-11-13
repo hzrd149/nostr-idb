@@ -1,5 +1,4 @@
 import { SyncDirection } from "applesauce-relay";
-import { Play, Square } from "lucide-react";
 import {
   ArrowDown,
   ArrowDownUp,
@@ -21,6 +20,7 @@ import { manager, useDB, writeEvents } from "../lib/db.ts";
 import { IdbSyncStore } from "../lib/idb-store.ts";
 import { filterSummary, fmtMs, fmtNum } from "../lib/nostr.ts";
 import { pool } from "../lib/pool.ts";
+import { ImportSession } from "../lib/relay.ts";
 
 type Direction = "pull" | "push" | "both";
 
@@ -43,6 +43,10 @@ type RelaySync = {
   received: number;
   sent: number;
   rejected: number;
+  /** how events were pulled, REQ when the relay lacks NIP-77 */
+  method: "negentropy" | "REQ";
+  /** REQ fallback events skipped because they were already local */
+  skipped: number;
   negotiateMs?: number;
   transferMs?: number;
   error?: string;
@@ -79,6 +83,7 @@ export function SyncPage() {
   const [direction, setDirection] = useState<Direction>("pull");
   const [concurrency, setConcurrency] = useState(4);
   const [batchSize, setBatchSize] = useState(500);
+  const [fallbackMax, setFallbackMax] = useState(10_000);
   const [session, setSession] = useState<Session | null>(null);
   const [running, setRunning] = useState(false);
   const [feed, setFeed] = useState<NostrEvent[]>([]);
@@ -120,6 +125,8 @@ export function SyncPage() {
         received: 0,
         sent: 0,
         rejected: 0,
+        method: "negentropy",
+        skipped: 0,
       })),
     };
     setSession(s);
@@ -185,15 +192,68 @@ export function SyncPage() {
     };
     const flushTimer = setInterval(flush, 300);
     const rateTimer = setInterval(() => {
-      setRates((r) => [...r, perSecond].slice(-120));
+      const n = perSecond;
       perSecond = 0;
+      setRates((r) => [...r, n].slice(-120));
     }, 1000);
 
     const syncRelay = (run: RelaySync) =>
       new Promise<void>((resolve) => {
         const relay = pool.relay(run.url);
         const finish = begin("sync", `${label} ${run.url}`);
+        // relays without NIP-77 can still be pulled from with paged REQs
+        const fallback = async () => {
+          run.method = "REQ";
+          run.status = "transferring";
+          run.error = undefined;
+          repaint();
+          await store.getSyncPairs(filter as never);
+          const t0 = performance.now();
+          const session = new ImportSession(
+            [run.url],
+            [filter],
+            { mode: "backfill", maxPerRelay: fallbackMax },
+            (event) => {
+              perSecond++;
+              if (store.has(event.id)) {
+                run.skipped++;
+                return;
+              }
+              run.received++;
+              buffer.push(event);
+              feedBuffer.push(event);
+            },
+            repaint,
+            () => {
+              const page = session.runs[0];
+              run.transferMs = performance.now() - t0;
+              if (page.status === "error") run.error = page.error;
+              run.status = controller.signal.aborted
+                ? "stopped"
+                : page.status === "error"
+                  ? "error"
+                  : "done";
+              finish(
+                run.status === "error" ? "error" : "ok",
+                `REQ fallback ↓ ${fmtNum(run.received)} new, ${fmtNum(run.skipped)} already local`,
+              );
+              repaint();
+              resolve();
+            },
+          );
+          controller.signal.addEventListener("abort", () => session.stop());
+        };
+
         const fail = (error: unknown) => {
+          if (
+            !compareOnly &&
+            direction !== "push" &&
+            !controller.signal.aborted &&
+            /NIP-77/.test(errorText(error))
+          ) {
+            fallback();
+            return;
+          }
           run.status = controller.signal.aborted ? "stopped" : "error";
           run.error = errorText(error);
           finish("error", run.error);
@@ -323,9 +383,30 @@ export function SyncPage() {
           onChange={setDirection}
           wide
           options={[
-            { value: "pull", label: <><ArrowDown size={16} /> pull</> },
-            { value: "push", label: <><ArrowUp size={16} /> push</> },
-            { value: "both", label: <><ArrowDownUp size={16} /> both</> },
+            {
+              value: "pull",
+              label: (
+                <>
+                  <ArrowDown size={16} /> pull
+                </>
+              ),
+            },
+            {
+              value: "push",
+              label: (
+                <>
+                  <ArrowUp size={16} /> push
+                </>
+              ),
+            },
+            {
+              value: "both",
+              label: (
+                <>
+                  <ArrowDownUp size={16} /> both
+                </>
+              ),
+            },
           ]}
         />
         <NumberField
@@ -342,6 +423,15 @@ export function SyncPage() {
           onChange={(v) => setBatchSize(Math.max(1, v))}
           presets={[100, 500, 2000]}
         />
+        {direction !== "push" && (
+          <NumberField
+            label="REQ fallback max / relay"
+            value={fallbackMax}
+            min={1}
+            onChange={(v) => setFallbackMax(Math.max(1, v))}
+            presets={[1000, 10_000, 100_000]}
+          />
+        )}
 
         <div className="btn-row">
           {running ? (
@@ -431,7 +521,8 @@ export function SyncPage() {
             <div className="sync-table">
               {runs.map((r) => {
                 const local = session.local ?? 0;
-                const both = Math.max(0, local - r.localOnly);
+                const negotiated = r.method === "negentropy" && !r.error;
+                const both = negotiated ? Math.max(0, local - r.localOnly) : 0;
                 const pullTotal = direction !== "push" ? r.relayOnly : 0;
                 const pushTotal = direction !== "pull" ? r.localOnly : 0;
                 return (
@@ -465,11 +556,21 @@ export function SyncPage() {
                       />
                     </div>
                     <div className="sync-numbers">
-                      <span>
-                        {fmtNum(r.localOnly)} · {fmtNum(both)} ·{" "}
-                        {fmtNum(r.relayOnly)}
-                      </span>
-                      {!session.compareOnly && pullTotal > 0 && (
+                      {negotiated && (
+                        <span>
+                          {fmtNum(r.localOnly)} · {fmtNum(both)} ·{" "}
+                          {fmtNum(r.relayOnly)}
+                        </span>
+                      )}
+                      {r.method === "REQ" && (
+                        <span>
+                          paged REQ · ↓ {fmtNum(r.received)} new ·{" "}
+                          <span className="muted">
+                            {fmtNum(r.skipped)} already local
+                          </span>
+                        </span>
+                      )}
+                      {!session.compareOnly && negotiated && pullTotal > 0 && (
                         <span>
                           ↓ {fmtNum(r.received)} / {fmtNum(pullTotal)}
                         </span>

@@ -6,20 +6,14 @@ import {
   Zap,
   ChartPie,
   RefreshCw,
-  Settings,
+  Database,
   type LucideIcon,
 } from "lucide-react";
 import type { Filter } from "../src/index.ts";
 import { ActivityLog } from "./components/ActivityLog.tsx";
-import { Field, NumberField } from "./components/ui.tsx";
+import { DatabasePicker, DatabaseTabs } from "./components/DatabaseTabs.tsx";
 import { AppCtx, type Tab } from "./lib/app.ts";
-import {
-  DEFAULT_OPTIONS,
-  manager,
-  useDB,
-  useLiveStats,
-  type ExplorerOptions,
-} from "./lib/db.ts";
+import { manager, useDB, useLiveStats } from "./lib/db.ts";
 import { fmtBytes, fmtNum } from "./lib/nostr.ts";
 import { ImportPage } from "./pages/ImportPage.tsx";
 import { InspectPage } from "./pages/InspectPage.tsx";
@@ -37,100 +31,13 @@ const TABS: { tab: Tab; icon: LucideIcon; label: string; key: string }[] = [
   { tab: "inspect", icon: ChartPie, label: "Inspect", key: "6" },
 ];
 
-function OptionsPopover({ onClose }: { onClose: () => void }) {
-  const { options, name } = useDB();
-  const [draft, setDraft] = useState<ExplorerOptions>(options);
-  const [dbName, setDbName] = useState(name);
-  const set = (k: keyof ExplorerOptions) => (v: number) =>
-    setDraft((d) => ({ ...d, [k]: v }));
-  return (
-    <div className="popover" onClick={(e) => e.stopPropagation()}>
-      <Field label="database">
-        <input
-          className="grow"
-          value={dbName}
-          onChange={(e) => setDbName(e.target.value)}
-        />
-      </Field>
-      <NumberField
-        label="maxEvents"
-        value={draft.maxEvents}
-        onChange={set("maxEvents")}
-        presets={[1000, 10_000, 1_000_000]}
-      />
-      <NumberField
-        label="maxMemoryEvents"
-        value={draft.maxMemoryEvents}
-        onChange={set("maxMemoryEvents")}
-        presets={[0, 1000, 10_000]}
-      />
-      <NumberField
-        label="cacheIndexes"
-        value={draft.cacheIndexes}
-        onChange={set("cacheIndexes")}
-        presets={[0, 100, 1000, 10_000]}
-      />
-      <NumberField
-        label="writeInterval"
-        value={draft.writeInterval}
-        onChange={set("writeInterval")}
-        presets={[10, 100, 1000]}
-        suffix="ms"
-      />
-      <NumberField
-        label="pruneInterval"
-        value={draft.pruneInterval}
-        onChange={set("pruneInterval")}
-        presets={[5000, 60_000]}
-        suffix="ms"
-      />
-      <div className="btn-row">
-        <button
-          className="btn primary"
-          onClick={() => {
-            manager.open(dbName.trim() || name, draft);
-            onClose();
-          }}
-        >
-          reopen
-        </button>
-        <button className="btn" onClick={() => setDraft(DEFAULT_OPTIONS)}>
-          defaults
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function Header() {
-  const { name, ready } = useDB();
   const stats = useLiveStats(1000);
-  const [showOptions, setShowOptions] = useState(false);
-
-  useEffect(() => {
-    if (!showOptions) return;
-    const close = () => setShowOptions(false);
-    window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [showOptions]);
 
   return (
     <header className="header">
       <span className="logo">nostr-idb</span>
-      <span
-        className="dbname"
-        onClick={(e) => {
-          e.stopPropagation();
-          setShowOptions((s) => !s);
-        }}
-      >
-        <span className={`status-dot ${ready ? "open" : "connecting"}`} />
-        {name}
-        <Settings size={16} />
-        {showOptions && (
-          <OptionsPopover onClose={() => setShowOptions(false)} />
-        )}
-      </span>
+      <DatabaseTabs />
       <span style={{ flex: 1 }} />
       {stats && (
         <span className="header-stats">
@@ -161,7 +68,24 @@ function Header() {
   );
 }
 
+function NoDatabase() {
+  return (
+    <div className="no-database">
+      <div className="no-database-card">
+        <h2>
+          <Database size={22} /> No database open
+        </h2>
+        <p className="muted">
+          Create a new database or open one that already exists in this browser.
+        </p>
+        <DatabasePicker />
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const { name } = useDB();
   const [tab, setTab] = useState<Tab>("query");
   const [request, setRequest] = useState<{
     filters: Filter[];
@@ -169,7 +93,7 @@ export default function App() {
   } | null>(null);
 
   useEffect(() => {
-    manager.open();
+    manager.init();
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey) return;
       const t = TABS.find((t) => t.key === e.key);
@@ -211,25 +135,31 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <main className="app-content">
-          <div className="tab" hidden={tab !== "query"}>
-            <QueryPage request={request} active={tab === "query"} />
-          </div>
-          <div className="tab" hidden={tab !== "store"}>
-            <StorePage />
-          </div>
-          <div className="tab" hidden={tab !== "import"}>
-            <ImportPage />
-          </div>
-          <div className="tab" hidden={tab !== "sync"}>
-            <SyncPage />
-          </div>
-          <div className="tab" hidden={tab !== "stress"}>
-            <StressPage />
-          </div>
-          <div className="tab" hidden={tab !== "inspect"}>
-            <InspectPage active={tab === "inspect"} />
-          </div>
+        <main className="app-content" key={name}>
+          {name ? (
+            <>
+              <div className="tab" hidden={tab !== "query"}>
+                <QueryPage request={request} active={tab === "query"} />
+              </div>
+              <div className="tab" hidden={tab !== "store"}>
+                <StorePage />
+              </div>
+              <div className="tab" hidden={tab !== "import"}>
+                <ImportPage />
+              </div>
+              <div className="tab" hidden={tab !== "sync"}>
+                <SyncPage />
+              </div>
+              <div className="tab" hidden={tab !== "stress"}>
+                <StressPage />
+              </div>
+              <div className="tab" hidden={tab !== "inspect"}>
+                <InspectPage active={tab === "inspect"} />
+              </div>
+            </>
+          ) : (
+            <NoDatabase />
+          )}
         </main>
         <ActivityLog />
       </div>
