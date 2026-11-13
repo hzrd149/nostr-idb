@@ -11,6 +11,7 @@ describe("exports", () => {
         "NOSTR_IDB_VERSION",
         "addEvents",
         "clearDB",
+        "configureDiagnostics",
         "countEvents",
         "countEventsByKind",
         "countEventsByPubkeys",

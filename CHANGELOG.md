@@ -8,6 +8,12 @@
 - Preserve sidecars across duplicate saves, replace them without merging, and isolate them by exact event ID across replaceable-event versions; support pending, cached, and persisted reads and updates.
 - Expose low-level sidecar writes and row-reader callbacks without requiring a database version upgrade.
 
+### Diagnostics
+
+- Replace the direct `debug` dependency with browser console logging and library-wide `configureDiagnostics({ debug, timing })` flags, both off by default.
+- Add concurrency-safe console timers for database lifecycle, queries and index reads, writes, queue processing, deletion, pruning, and subscription loading.
+- Wait for deletion transactions to finish before reporting completion and ending their timers.
+
 ### Performance Improvements
 
 - Reduce event-body reads for limited author and kind queries while preserving timestamp ties, cached-event precedence, and filter semantics.
@@ -17,6 +23,7 @@
 
 ### Fixes
 
+- Support empty and limit-only filters across stored event kinds, with bounded ID reads for limit-only filters and a console warning for unlimited empty `NostrIDB` queries and subscriptions.
 - Keep index-cache eviction tracking consistent when touching or replacing entries so capacity limits remain enforced.
 - Wait for write transactions to complete and propagate transaction failures from `addEvents` and `updateUsed`.
 
@@ -26,6 +33,9 @@
 
 ### Maintenance
 
+- Remove unused direct `esbuild` and `fake-indexeddb` development dependencies; Vite manages esbuild and browser tests use native IndexedDB.
+- Add a concise exported API overview to the README, including database helpers, cache utilities, and types.
+- Simplify the README to a package overview and pseudocode usage example; keep development and release guidance in `AGENTS.md`.
 - Instruct agents to validate and commit significant changes and new features without including unrelated work.
 - Update Vitest browser and coverage packages to 4.1.12 to address critical browser-mode and moderate mocker vulnerabilities.
 - Remove unused Svelte development dependencies and configuration from the React-based examples setup.

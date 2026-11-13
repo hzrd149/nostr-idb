@@ -1,204 +1,119 @@
 # nostr-idb
 
-A collection of helper methods for storing nostr events in an IndexedDB and talking to it like a nostr relay
+A TypeScript library for storing and querying Nostr events locally in the browser
+with IndexedDB. It provides a NIP-DB-compatible API, in-memory caching, batched
+writes, live subscriptions, NIP-91 AND-tag filters, and app-defined event sidecar metadata.
 
-Live Examples: https://hzrd149.github.io/nostr-idb/
-
-- [NostrIDB Class](#nostridb-class)
-- [Methods](#methods)
-  - [openDB](#openDB)
-  - [clearDB](#clearDB)
-  - [deleteDB](#deleteDB)
-- [Performance](#Performance)
-
-## Features
-
-- Built directly on top of IndexedDB for the lowest latency
-- Caches indexes in memory
-- `NostrIDB` class with NIP-DB-compatible API (`query`, `count`, `subscribe` as AsyncGenerator)
-- NIP-91 AND-filter support (`&t` keys)
-- App-defined event sidecar metadata with extraction and attachment hooks
-
-## Development and CI
-
-The locked Nix flake provides Node.js 24, pnpm 10, and Chromium on Linux:
+## Install
 
 ```sh
-nix develop
-pnpm install --frozen-lockfile
-pnpm build
-pnpm test:run --browser.headless
+pnpm add nostr-idb
 ```
 
-Nix supplies Chromium through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; outside
-the Nix shell, Vitest uses Playwright's installed browser as usual.
+## Usage
 
-Nostr CI runs `.ngit/act/workflows/test.yml` on pushes and pull requests.
-For coordinators requiring a service request, enable the repository with
-`ngit ci request <coordinator-npub> --json` after publishing the workflow. Check results with
-`ngit ci status <commit> --json`.
-
-## Changelog and releases
-
-Record each change as an item under `Unreleased` in [CHANGELOG.md](./CHANGELOG.md)
-as part of the change itself. Group related items under descriptive headings.
-Package versions are bumped only when cutting a release.
-
-To release from a clean working tree with all intended changes committed:
-
-1. Bump `version` in `package.json` to the next semantic version.
-2. Finalize the `Unreleased` notes under a heading matching that version, and
-   leave a new, empty `Unreleased` section at the top.
-3. Run `pnpm install --frozen-lockfile`, `pnpm build`, and
-   `pnpm test:run --browser.headless`.
-4. Commit the version bump and changelog, then create an annotated Git tag
-   matching the package version (for example, `git tag -a vX.Y.Z -m "vX.Y.Z"`).
-5. Push the release commit and tag to the Git repository (and any maintained
-   mirrors).
-6. Publish the built package to npm with `pnpm publish`.
-
-## NostrIDB Class
-
-The `NostrIDB` class is the main interface for working with nostr events in IndexedDB. It provides a NIP-DB-compatible API with automatic batching, caching, and subscription management.
-
-### Basic Usage
+JavaScript-style pseudocode (`event` comes from your app or a relay):
 
 ```javascript
-import { NostrIDB, openDB } from "nostr-idb";
+import { NostrIDB } from "nostr-idb";
 
-// Option 1: provide an existing IDB instance
-const db = await openDB("my-nostr-db");
-const nostrDB = new NostrIDB(db);
+const db = new NostrIDB();
 
-// Option 2: omit the db argument — opens the default "nostr-idb" database
-const nostrDB = new NostrIDB();
+await db.add(event);
+const notes = await db.query({ kinds: [1], limit: 20 });
+const savedEvent = await db.event(event.id);
 
-// Add events
-await nostrDB.add(event1);
-await nostrDB.add(event2);
-
-// Query events (one-shot)
-const events = await nostrDB.query([{ kinds: [1], limit: 10 }]);
-
-// Subscribe to events as an async generator
-for await (const event of nostrDB.subscribe([{ kinds: [1] }])) {
-  console.log("Event:", event);
-  // The generator ends after delivering all stored events
+// Stream stored and newly added notes; break when finished.
+for await (const note of db.subscribe({ kinds: [1] })) {
+  display(note);
+  if (done) break;
 }
 
-// Get a specific event by ID
-const event = await nostrDB.event("event-id");
-
-// Count events matching filters
-const count = await nostrDB.count([{ kinds: [1] }]);
-
-// Stop background processes (flush timers, prune interval)
-await nostrDB.stop();
+await db.stop();
 ```
 
-### Configuration Options
+## API overview
 
-```javascript
-const nostrDB = new NostrIDB(db, {
-  batchWrite: 1000, // Number of events to batch before writing (default: 1000)
-  writeInterval: 100, // Write interval in ms (default: 100)
-  cacheIndexes: 1000, // Number of indexes to cache in memory (default: 1000)
-  pruneInterval: 60000, // How often to prune old events in ms (default: 60000)
-  maxEvents: 10000, // Maximum number of events to store (default: 10000)
-  maxMemoryEvents: 10000, // Event bodies cached in memory (defaults to maxEvents; 0 disables)
-});
+### Diagnostics
+
+```ts
+import { configureDiagnostics } from "nostr-idb";
+
+configureDiagnostics({ debug: true, timing: true });
+configureDiagnostics({ timing: false }); // Leave debug logging enabled
 ```
 
-### API Methods
+Both flags default to `false` and apply to all instances in this loaded copy of
+the library, including standalone helpers. The same function and its
+`DiagnosticsOptions` type are exported from `nostr-idb/database`. Omitted flags
+keep their current values; changes take effect at runtime.
 
-#### `add(event: TEvent, metadata?: TMetadata): Promise<boolean>`
+`debug` enables namespaced `console.debug` messages (enable the browser console's
+Verbose level if needed). It replaces the previous `DEBUG` environment variable
+and `localStorage.debug` configuration, which are no longer read.
 
-Add a single event to the database. Returns `true` if the event was accepted. Ephemeral events are fanned out to active subscriptions but not persisted.
+`timing` independently enables `console.time` / `console.timeEnd` for database
+operations, index queries, event loading, nonempty write-queue flushes, and
+subscription historical reads. Labels include the operation, database name when
+available, and a unique invocation number. Nested timings overlap and should not
+be added together. Timers close on success or failure, even if timing is disabled
+while an operation is running. Timings include asynchronous waiting; console
+instrumentation itself adds overhead.
 
-#### `setMetadata(eventId: string, metadata: TMetadata): Promise<boolean>`
+### `NostrIDB`
 
-Replace the entire sidecar for an exact event ID, including pending and cached copies. Returns `false` if the event is neither persisted nor pending. For replaceable events, pass the event's `id`, not its address/UID.
+`new NostrIDB(db?, options?)` opens the default database or wraps one returned by
+`openDB(name)`. Accepts signed events and unsigned rumors.
 
-#### `clearMetadata(eventId: string): Promise<boolean>`
+| Method                                         | Purpose                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| `add(event, metadata?)`                        | Accept an event and optionally replace its sidecar metadata.       |
+| `setMetadata(eventId, metadata)`               | Replace metadata for an exact stored or pending event ID.          |
+| `clearMetadata(eventId)`                       | Remove metadata for an exact stored or pending event ID.           |
+| `event(id)`                                    | Look up an event by ID.                                            |
+| `replaceable(kind, author, identifier?)`       | Get the latest replaceable event.                                  |
+| `query(filters)`                               | Return matching events as an array.                                |
+| `count(filters)`                               | Count matching events.                                             |
+| `subscribe(filters)`                           | Async generator of stored and newly added events.                  |
+| `supports()`                                   | Return supported optional feature names.                           |
+| `deleteEvent(id)`                              | Delete an event by ID or UID.                                      |
+| `deleteReplaceable(pubkey, kind, identifier?)` | Delete a replaceable event.                                        |
+| `deleteByFilters(filters)`                     | Delete matching events.                                            |
+| `deleteAllEvents()`                            | Remove all events.                                                 |
+| `start()` / `stop()`                           | Start or stop background writes and pruning; starts automatically. |
 
-Remove the sidecar for an exact event ID. Returns `false` if the event is neither persisted nor pending.
+Filters accept one `Filter` or an array, including standard Nostr `#tag` filters
+and NIP-91 `&tag` AND filters. Options control batching, write/prune intervals,
+index-cache size, stored-event limits, and in-memory event limits.
+See [options and implementation](./src/nostrdb/nostrdb.ts).
 
-#### `event(id: string): Promise<NostrEvent | undefined>`
+An empty filter matches all stored kinds: `await db.query({})` returns every
+event, newest first. Use `await db.query({ limit: 100 })` to bound the result.
+Unlimited empty queries and subscriptions emit a console warning because their
+results can load the entire database into application memory. `db.count({})`
+counts all persisted events; `db.deleteByFilters({})` deletes all persisted events.
+An empty filter array (`[]`) remains invalid.
 
-Get a single event by its ID.
-
-#### `replaceable(kind: number, author: string, identifier?: string): Promise<NostrEvent | undefined>`
-
-Get the latest replaceable event for a given kind, author, and optional identifier.
-
-#### `count(filters: Filter | Filter[]): Promise<number>`
-
-Count the number of events matching the given filters. Accepts a single filter or an array.
-
-#### `query(filters: Filter | Filter[]): Promise<NostrEvent[]>`
-
-Query events matching the given filters and return them as an array. Accepts a single filter or an array.
-
-#### `subscribe(filters: Filter | Filter[]): AsyncGenerator<NostrEvent, void, undefined>`
-
-Subscribe to events matching the filters. Yields stored historical events first, then any new events added via `add()`. The generator ends once the subscription is closed (i.e. the caller breaks out of the `for await` loop or calls `.return()`).
-
-```javascript
-// Read all stored kind-1 events, then stop
-for await (const event of nostrDB.subscribe({ kinds: [1] })) {
-  console.log(event);
-}
-
-// Keep receiving live events until cancelled
-const gen = nostrDB.subscribe([{ kinds: [1] }]);
-for await (const event of gen) {
-  console.log("Live event:", event);
-  if (shouldStop) break; // cleans up the subscription
-}
-```
-
-#### `supports(): Promise<string[]>`
-
-Returns an array of supported feature strings. Currently returns `[]`. Feature strings follow the NIP-DB convention (e.g. `"search"` for NIP-50 full-text search).
-
-#### `deleteEvent(eventId: string): Promise<boolean>`
-
-Delete a single event by its ID.
-
-#### `deleteReplaceable(pubkey: string, kind: number, identifier?: string): Promise<boolean>`
-
-Delete a replaceable event by pubkey, kind, and optional identifier.
-
-#### `deleteByFilters(filters: Filter | Filter[]): Promise<number>`
-
-Delete all events matching the given filters. Returns the number of deleted events. Accepts a single filter or an array.
-
-#### `deleteAllEvents(): Promise<void>`
-
-Delete all events from the database.
-
-#### `start(): Promise<void>`
-
-Start background write-flush and prune timers. Called automatically by the constructor — you only need this if you called `stop()` and want to resume.
-
-#### `stop(): Promise<void>`
-
-Stop background write-flush and prune timers.
+Time filters such as `{ until: timestamp, limit: 100 }` also match all kinds.
+`until` is inclusive: timestamp-only pagination can repeat events, or skip events
+sharing the boundary timestamp if you subtract one second. There is currently no
+continuation-cursor API.
 
 ### Event sidecar metadata
 
-Metadata is generic and stored alongside the event as an optional `metadata` field
-in its database row. Configure synchronous hooks to translate event properties or
-symbols into structured-cloneable data and restore that data on reads:
+Store app-defined data, such as relay sightings or signature-check results,
+alongside an event. Metadata is generic, structured-cloneable, and separate from
+the signed event fields. Use synchronous hooks to extract it from event properties
+or symbols and attach it when events are read:
 
-```typescript
-import { NostrIDB, openDB, type NostrEvent } from "nostr-idb";
+```ts
+import { NostrIDB, type NostrEvent } from "nostr-idb";
 
 type Metadata = { relays?: string[]; verified?: boolean };
 const metadataSymbol = Symbol.for("my-app.event-metadata");
 type AppEvent = NostrEvent & { [metadataSymbol]?: Metadata };
 
-const db = new NostrIDB<AppEvent, Metadata>(await openDB("my-events"), {
+const db = new NostrIDB<AppEvent, Metadata>(undefined, {
   metadata: {
     read: (event) => event[metadataSymbol],
     attach(event, metadata) {
@@ -208,115 +123,65 @@ const db = new NostrIDB<AppEvent, Metadata>(await openDB("my-events"), {
   },
 });
 
-// For an AppEvent received by your application:
+// `event` is an AppEvent supplied by your application.
 await db.add(event, { relays: ["wss://relay.example"], verified: true });
-await db.add(event); // Extract using read(event)
-
-// Replace, rather than merge, the existing sidecar:
+await db.add(event); // Extract metadata using read(event)
 await db.setMetadata(event.id, { relays: ["wss://another.example"] });
 await db.clearMetadata(event.id);
 ```
 
-- Explicit metadata takes precedence over `read`. An explicitly supplied
-  `undefined` skips extraction. Missing/undefined metadata preserves the existing
-  sidecar for that exact event; use `clearMetadata` to remove it.
-- Metadata is snapshotted at the time of the call. Mutating the original value or
-  attached data does not change the persisted sidecar; call `add` or `setMetadata`
-  again to save changes. Non-cloneable metadata rejects the operation.
-- `attach` receives a separate copy on reads and updates. It must remove previously
-  attached metadata when passed `undefined`, and must not change signed event fields.
-  Symbols or non-enumerable properties keep attachments out of event JSON.
-- Metadata follows an exact event ID. Newer replaceable events do not inherit the
-  previous version's sidecar. Re-adding the same event can replace its metadata.
-- `query`, `event`, `replaceable`, and historical subscriptions restore metadata.
-  Pending query results and objects retained in this instance's event cache are
-  updated too. Metadata-only updates do not emit subscription events. Other
-  instances' caches and previously returned objects no longer cached are not synchronized.
-- `add` and updates to pending events use the normal write queue; updating an
-  already persisted event waits for its metadata write to complete. Updates are
-  serialized with queue flushes. A `writeQueue.processEvents` hook must not await
-  `add`, metadata mutations, or another flush on the same instance.
-- Existing database rows without sidecars remain readable; no schema migration is
-  needed. Deleting or pruning a persisted row removes its sidecar with it.
-- Verification flags are app-provided data; storing them does not verify signatures.
+- Explicit metadata takes precedence over extraction and replaces the entire
+  sidecar; values are never merged. Explicit `undefined` skips extraction.
+  Missing/undefined metadata preserves the existing sidecar for that exact event;
+  use `clearMetadata` to remove it.
+- Values are snapshotted when passed to `add` or `setMetadata`. Mutating an
+  attached value does not persist it automatically. Non-cloneable metadata rejects
+  the operation. `attach` receives a separate copy and must remove old metadata
+  when passed `undefined`; it must not change signed fields. Symbol or
+  non-enumerable attachments stay out of event JSON.
+- `event`, `replaceable`, `query`, and historical subscriptions restore metadata.
+  Updates also refresh pending events and objects retained in this instance's
+  cache, without emitting another subscription event. Other instances' caches and
+  objects no longer cached are not synchronized.
+- `setMetadata` and `clearMetadata` return `false` when the event is neither
+  persisted nor pending. Pass the exact event ID, not a replaceable address/UID.
+  Newer replaceable events do not inherit the previous event's metadata.
+- Adds and updates to pending events use the write queue; updates to persisted
+  events wait for the metadata write. Updates are serialized with flushes, so a
+  `writeQueue.processEvents` hook must not await `add`, metadata updates, or another
+  flush on the same instance.
+- Existing rows remain readable without a database migration. Deleting or pruning
+  a persisted row removes its sidecar too. Verification flags are app-provided
+  assertions; storing them does not verify signatures.
 
-Low-level users can pass a `ReadonlyMap<string, unknown>` keyed by event ID as the
-third argument to `addEvents`. Missing entries preserve existing sidecars; an
-explicit `undefined` entry clears one. `setEventMetadata(db, id, value)` updates a
-persisted sidecar independently (`undefined` clears). The query helpers accept an
-optional final `EventReader` callback receiving `{ event, tags, metadata? }` to
-restore metadata onto returned events. Low-level writes do not synchronize
-`NostrIDB` caches.
+For low-level access, `addEvents(db, events, metadataById?)` accepts a
+`ReadonlyMap<string, unknown>` keyed by event ID. Missing entries preserve existing
+sidecars; an explicit `undefined` entry clears one.
+`setEventMetadata(db, eventId, value)` updates a persisted sidecar independently
+(`undefined` clears). Event query helpers accept an optional final `EventReader`
+callback receiving `{ event, tags, metadata? }` to restore metadata onto returned
+events. Low-level writes do not synchronize `NostrIDB` caches.
 
-### Advanced Usage
+### Other exports
 
-```javascript
-// Batch add multiple events
-const events = [event1, event2, event3];
-for (const event of events) {
-  await nostrDB.add(event);
-}
+All database helpers are available from both `nostr-idb` and `nostr-idb/database`.
 
-// Single-filter shorthand (no array required)
-const count = await nostrDB.count({ kinds: [1], authors: ["pubkey"] });
-const results = await nostrDB.query({ kinds: [1], limit: 50 });
+| Exports                                                           | Purpose                                                            |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `openDB`, `clearDB`, `deleteDB`                                   | Open, empty, or delete an IndexedDB database.                      |
+| `addEvents`, `updateUsed`, `pruneLastUsed`                        | Bulk storage, usage tracking, and eviction.                        |
+| `setEventMetadata`                                                | Replace or clear a persisted event's sidecar by exact ID.          |
+| [Query helpers](./src/database/query-filter.ts)                   | Query indexes, retrieve IDs/events, and count matches for filters. |
+| [Miscellaneous queries](./src/database/query-misc.ts)             | Get replaceable events; count by author, kind, or database.        |
+| [Deletion helpers](./src/database/delete.ts)                      | Delete by ID, filter, or replaceable-event address.                |
+| `getEventUID`, `getEventTags`, `INDEXABLE_TAGS`, `EventUIDSymbol` | Event identity and index-tag utilities.                            |
+| `NOSTR_IDB_NAME`, `NOSTR_IDB_VERSION`                             | Default database name and schema version.                          |
+| `IndexCache`, `WriteQueue`                                        | Low-level cache and batched-write utilities (root export only).    |
 
-// NIP-91 AND-filter: events must have BOTH tag values
-const andResults = await nostrDB.query({ "&t": ["bitcoin", "nostr"] });
+**Types:** `NostrEvent`, `UnsignedEvent`, `RumorEvent`, `StoredEvent`,
+`EventTemplate`, `Filter`, `INostrIDB`, `NostrDBOptions`, `Features`,
+`NostrIDBDatabase`, `Schema`, `EventMetadataOptions`, and `EventReader`. Subscription implementation types
+`InternalSubscription` and `InternalSubscriptionFor` are also exported.
 
-// Query replaceable events
-const profile = await nostrDB.replaceable(0, "pubkey");
-const contactList = await nostrDB.replaceable(3, "pubkey");
-
-// Delete events by filters
-const deletedCount = await nostrDB.deleteByFilters([
-  { kinds: [1], authors: ["pubkey"] },
-]);
-console.log(`Deleted ${deletedCount} events`);
-```
-
-## Methods
-
-NOTE: all methods are async unless specified otherwise
-
-### openDB
-
-Opens a database with `name` and optional `callbacks`. See [openDB](https://www.npmjs.com/package/idb#opendb)
-
-If no name is provided it will default to `nostr-idb`.
-
-```javascript
-import { openDB, NostrIDB } from "nostr-idb";
-
-// Open the database
-const db = await openDB("nostr-idb");
-
-// Create a NostrIDB instance
-const nostrDB = new NostrIDB(db);
-
-// Use the NostrIDB instance
-await nostrDB.add(event);
-```
-
-### clearDB
-
-Remove all events from the database without deleting it.
-
-### deleteDB
-
-Calls `deleteDB` from `idb`. See [deleteDB](https://www.npmjs.com/package/idb#deletedb)
-
-### pruneLastUsed
-
-Removes the least recently used events until the database is at or below a size limit.
-
-The `NostrIDB` class automatically handles pruning based on the `maxEvents` option and removes pruned events from its in-memory caches. The `maxMemoryEvents` option bounds cached event bodies independently; evicted bodies can be loaded from disk again. Pending writes and active subscription buffers are separate from this cache limit. You can also prune manually:
-
-```javascript
-import { openDB, pruneLastUsed } from "nostr-idb";
-
-const db = await openDB("nostr-idb");
-
-// Keep only the 1000 most recently used events
-await pruneLastUsed(db, 1000);
-```
+[Live examples](https://hzrd149.github.io/nostr-idb/) ·
+[Changelog](./CHANGELOG.md)

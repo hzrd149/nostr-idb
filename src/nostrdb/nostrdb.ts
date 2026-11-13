@@ -25,7 +25,7 @@ import type { NostrIDBDatabase } from "../database/schema.js";
 import type { EventReader } from "../database/metadata.js";
 import { setEventMetadata } from "../database/metadata.js";
 import type { EventMetadataOptions } from "./metadata.js";
-import { logger } from "../debug.js";
+import { logger, startTimer } from "../debug.js";
 import { nanoid } from "../lib/nanoid.js";
 import { selectEventsForFilters } from "../utils.js";
 import { type INostrIDB } from "./interface.js";
@@ -320,10 +320,15 @@ export class NostrIDB<
   /** Get a single event by its ID */
   async event(id: string): Promise<TEvent | undefined> {
     const db = await this.getDb();
-    const result =
-      (await db.get("events", id)) ??
-      (await db.getFromIndex("events", "id", id));
-    return result ? this.readEvent(result) : undefined;
+    const end = startTimer("NostrIDB.event", db.name);
+    try {
+      const result =
+        (await db.get("events", id)) ??
+        (await db.getFromIndex("events", "id", id));
+      return result ? this.readEvent(result) : undefined;
+    } finally {
+      end();
+    }
   }
 
   /** Get the latest replaceable event for a given kind, author, and optional identifier */
@@ -345,36 +350,42 @@ export class NostrIDB<
 
   /** Get events matching the given filters */
   async query(filters: Filter | Filter[]): Promise<TEvent[]> {
-    const f = Array.isArray(filters) ? filters : [filters];
-    const db = await this.getDb();
-    const queue = await this.getWriteQueue();
+    const end = startTimer("NostrIDB.query", this.db?.name);
+    try {
+      const f = Array.isArray(filters) ? filters : [filters];
+      this.warnUnboundedQuery(f);
+      const db = await this.getDb();
+      const queue = await this.getWriteQueue();
 
-    // Get events from queue that match filters
-    const eventsFromQueue = queue.matchPending(f);
+      // Get events from queue that match filters
+      const eventsFromQueue = queue.matchPending(f);
 
-    // Get events from database
-    const filterEvents = await getEventsForFilters(
-      db,
-      eventsFromQueue.length ? f.map(({ limit, ...filter }) => filter) : f,
-      this.indexCache,
-      this.eventMap,
-      this.readEvent,
-    );
+      // Get events from database
+      const filterEvents = await getEventsForFilters(
+        db,
+        eventsFromQueue.length ? f.map(({ limit, ...filter }) => filter) : f,
+        this.indexCache,
+        this.eventMap,
+        this.readEvent,
+      );
 
-    // Add events to event map
-    this.addToEventMaps(filterEvents);
+      // Add events to event map
+      this.addToEventMaps(filterEvents);
 
-    // Combine and deduplicate events
-    const idsFromQueue = new Set(eventsFromQueue.map((e) => getEventUID(e)));
-    const events =
-      eventsFromQueue.length > 0
-        ? [
-            ...filterEvents.filter((e) => !idsFromQueue.has(getEventUID(e))),
-            ...eventsFromQueue,
-          ]
-        : filterEvents;
+      // Combine and deduplicate events
+      const idsFromQueue = new Set(eventsFromQueue.map((e) => getEventUID(e)));
+      const events =
+        eventsFromQueue.length > 0
+          ? [
+              ...filterEvents.filter((e) => !idsFromQueue.has(getEventUID(e))),
+              ...eventsFromQueue,
+            ]
+          : filterEvents;
 
-    return selectEventsForFilters(events, f);
+      return selectEventsForFilters(events, f);
+    } finally {
+      end();
+    }
   }
 
   /** Subscribe to events in the database based on filters */
@@ -382,6 +393,7 @@ export class NostrIDB<
     filters: Filter | Filter[],
   ): AsyncGenerator<TEvent, void, undefined> {
     const f = Array.isArray(filters) ? filters : [filters];
+    this.warnUnboundedQuery(f);
 
     const queue: TEvent[] = [];
     // seenUids deduplicates events that arrive both as historical (IDB) and live (add())
@@ -424,6 +436,20 @@ export class NostrIDB<
       }
     } finally {
       sub.close();
+    }
+  }
+
+  private warnUnboundedQuery(filters: Filter[]) {
+    if (
+      filters.some((filter) =>
+        Object.entries(filter).every(
+          ([key, value]) => value === undefined || (key === "search" && !value),
+        ),
+      )
+    ) {
+      console.warn(
+        "nostr-idb: An empty filter without a limit loads the entire database into memory. Use a limit to bound results.",
+      );
     }
   }
 
@@ -538,7 +564,6 @@ export class NostrIDB<
 
   /** Execute a subscription */
   protected async executeSubscription(sub: InternalSubscriptionFor<TEvent>) {
-    const start = new Date().valueOf();
     log(`Running ${sub.id}`, sub.filters);
 
     // load any events from the write queue
@@ -553,6 +578,7 @@ export class NostrIDB<
       }, this.baseEoseTimeout);
 
       // get events
+      const endLoad = startTimer("subscription.load", db.name);
       getEventsForFilters(
         db,
         eventsFromQueue.length
@@ -561,42 +587,41 @@ export class NostrIDB<
         this.indexCache,
         this.eventMap,
         this.readEvent,
-      ).then((filterEvents) => {
-        clearTimeout(timeout);
-        this.addToEventMaps(filterEvents);
+      )
+        .finally(endLoad)
+        .then((filterEvents) => {
+          clearTimeout(timeout);
+          this.addToEventMaps(filterEvents);
 
-        if (sub.event && !sub.closed) {
-          const idsFromQueue = new Set(
-            eventsFromQueue.map((e) => getEventUID(e)),
-          );
+          if (sub.event && !sub.closed) {
+            const idsFromQueue = new Set(
+              eventsFromQueue.map((e) => getEventUID(e)),
+            );
 
-          const events =
-            eventsFromQueue.length > 0
-              ? [
-                  ...filterEvents.filter(
-                    (e) => !idsFromQueue.has(getEventUID(e)),
-                  ),
-                  ...eventsFromQueue,
-                ]
-              : filterEvents;
+            const events =
+              eventsFromQueue.length > 0
+                ? [
+                    ...filterEvents.filter(
+                      (e) => !idsFromQueue.has(getEventUID(e)),
+                    ),
+                    ...eventsFromQueue,
+                  ]
+                : filterEvents;
 
-          for (const event of selectEventsForFilters(events, sub.filters)) {
-            try {
-              sub.event(event);
-            } catch (error) {
-              log(`event handler failed with error`, error);
+            for (const event of selectEventsForFilters(events, sub.filters)) {
+              try {
+                sub.event(event);
+              } catch (error) {
+                log(`event handler failed with error`, error);
+              }
             }
+
+            log(`Finished ${sub.id} and got ${events.length} events`);
           }
 
-          const delta = new Date().valueOf() - start;
-          log(
-            `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
-          );
-        }
-
-        if (sub.eose && !sub.closed) sub.eose();
-        res();
-      });
+          if (sub.eose && !sub.closed) sub.eose();
+          res();
+        });
     });
   }
 
