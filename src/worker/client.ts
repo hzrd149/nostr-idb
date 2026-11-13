@@ -19,6 +19,8 @@ export type NostrIDBClientOptions<
   TEvent extends StoredEvent = StoredEvent,
   TMetadata = unknown,
 > = {
+  /** Maximum events per query response message (default 100; positive safe integer). */
+  queryChunkSize?: number;
   /**
    * Metadata hooks, applied on the client side. `read` extracts metadata
    * from events passed to `add()`; `attach` restores it onto events received
@@ -92,6 +94,9 @@ export class NostrIDBClient<
     private endpoint: RPCEndpoint,
     private options: NostrIDBClientOptions<TEvent, TMetadata> = {},
   ) {
+    const chunkSize = options.queryChunkSize ?? 100;
+    if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0)
+      throw new Error("queryChunkSize must be a positive safe integer");
     this.ready = new Promise((resolve) => (this.markReady = resolve));
     endpoint.addEventListener("message", this.listener);
     endpoint.start?.();
@@ -250,8 +255,16 @@ export class NostrIDBClient<
     return this.call("supports");
   }
 
-  query(filters: Filter | Filter[]): Promise<TEvent[]> {
-    return this.call("query", filters);
+  async query(filters: Filter | Filter[]): Promise<TEvent[]> {
+    const events: TEvent[] = [];
+    for await (const chunk of this.pullStream<TEvent[]>("query", [
+      filters,
+      { chunkSize: this.options.queryChunkSize ?? 100 },
+    ])) {
+      // Avoid repeated array copies and argument-count limits on large results.
+      for (const event of chunk) events.push(event);
+    }
+    return events;
   }
 
   async queryPage(
@@ -274,30 +287,36 @@ export class NostrIDBClient<
     options: QueryPageOptions = {},
   ): AsyncGenerator<QueryPage<TEvent>, void, undefined> {
     const { signal, ...rest } = options;
+    yield* this.pullStream<QueryPage<TEvent>>("pages", [filters, rest], signal);
+  }
+
+  private async *pullStream<T>(
+    method: "query" | "pages",
+    args: unknown[],
+    signal?: AbortSignal,
+  ): AsyncGenerator<T, void, undefined> {
     signal?.throwIfAborted();
     await abortable(this.ready, signal);
     signal?.throwIfAborted();
     if (this.closed) throw this.closed;
 
     const id = this.nextId++;
-    this.post({ type: "stream", id, method: "pages", args: [filters, rest] });
+    this.post({ type: "stream", id, method, args });
     this.openStreams.add(id);
     // true until the server ends the stream, so early exits cancel it
     let open = true;
     try {
       for (;;) {
         signal?.throwIfAborted();
-        const msg = await this.request(
-          { type: "pull", id, method: "pages" },
-          signal,
-        );
+        const msg = await this.request({ type: "pull", id, method }, signal);
         signal?.throwIfAborted();
+        if (this.closed) throw this.closed;
         if (msg.type === "done") {
           open = false;
           return;
         }
         if (msg.type !== "next") throw new Error(`Unexpected ${msg.type}`);
-        yield this.restore("pages", msg.value as QueryPage<TEvent>, msg.meta);
+        yield this.restore(method, msg.value as T, msg.meta);
       }
     } finally {
       if (open) this.cancelStream(id);

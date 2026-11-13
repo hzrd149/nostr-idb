@@ -259,6 +259,13 @@ for await (const note of db.subscribe(
 - `pages()` pulls one page per round trip; `iterate()` is built on it.
   `subscribe()` pushes events as they arrive. Aborting a `signal` cancels the
   stream on the server too, including an idle subscription.
+- `query()` transfers results in pull-based chunks of at most 100 events,
+  restoring metadata and appending each chunk before requesting the next.
+  Configure this with `new NostrIDBClient(worker, { queryChunkSize: 50 })`.
+  The return value remains `Promise<Event[]>`, with the same filters, ordering,
+  and pending-event behavior. Both sides still accumulate the full result;
+  use `pages()` for bounded database reads and incremental consumption.
+  Chunk size limits event count, not bytes or rendering time.
 - Events are structured clones: symbol properties are dropped. To carry sidecar
   metadata, create the worker's `NostrIDB` with `metadata: serverMetadata` and
   pass your `read`/`attach` hooks to `new NostrIDBClient(worker, { metadata })`.

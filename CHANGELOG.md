@@ -21,6 +21,7 @@
 
 ### Performance Improvements
 
+- Transfer worker `query()` results in backpressured chunks (100 events by default, configurable via `queryChunkSize`) while preserving query semantics and metadata; release streams on errors and suppress responses after cancellation.
 - Speed up event-body cache population by retaining only surviving entries from oversized batches, reusing the eviction iterator, and skipping insertion when body caching is disabled.
 - Reduce event-body reads for limited author and kind queries while preserving timestamp ties, cached-event precedence, and filter semantics.
 - Reduce IndexedDB write overhead by avoiding unused per-request Promises.

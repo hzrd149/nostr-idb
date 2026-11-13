@@ -1,5 +1,5 @@
 import type { INostrIDB } from "../nostrdb/interface.js";
-import type { StoredEvent } from "../lib/nostr.js";
+import type { Filter, StoredEvent } from "../lib/nostr.js";
 import type { EventMetadataOptions } from "../nostrdb/metadata.js";
 import type { NostrIDB } from "../nostrdb/nostrdb.js";
 import {
@@ -36,6 +36,7 @@ export const serverMetadata: EventMetadataOptions<StoredEvent, unknown> = {
 
 type Stream = {
   controller: AbortController;
+  method?: StreamMethod;
   iterator?: AsyncIterator<unknown>;
 };
 
@@ -89,15 +90,40 @@ export function serveNostrIDB(
     }
   }
 
+  async function* queryChunks(
+    filters: Filter | Filter[],
+    chunkSize: number,
+    signal: AbortSignal,
+  ) {
+    if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0)
+      throw new Error("queryChunkSize must be a positive safe integer");
+    // Query once to preserve ordering, limits, pending events, and deduplication.
+    // Only transport is chunked; the database still materializes the result.
+    const events = await nostr.query(filters);
+    for (let offset = 0; offset < events.length; offset += chunkSize) {
+      if (signal.aborted) return;
+      yield events.slice(offset, offset + chunkSize);
+    }
+  }
+
   function open(id: number, method: StreamMethod, args: unknown[]) {
     const controller = new AbortController();
     const [filters, options] = args as [unknown, object | undefined];
     const iterator = (
-      method === "pages"
-        ? nostr.pages(filters as any, { ...options, signal: controller.signal })
-        : nostr.subscribe(filters as any, { signal: controller.signal })
+      method === "query"
+        ? queryChunks(
+            filters as Filter | Filter[],
+            (options as { chunkSize?: number } | undefined)?.chunkSize ?? 100,
+            controller.signal,
+          )
+        : method === "pages"
+          ? nostr.pages(filters as any, {
+              ...options,
+              signal: controller.signal,
+            })
+          : nostr.subscribe(filters as any, { signal: controller.signal })
     )[Symbol.asyncIterator]();
-    streams.set(id, { controller, iterator });
+    streams.set(id, { controller, iterator, method });
 
     // subscriptions push every event until done or cancelled
     if (method === "subscribe") {
@@ -135,6 +161,7 @@ export function serveNostrIDB(
       });
     try {
       const r = await stream.iterator.next();
+      if (stream.controller.signal.aborted) return;
       if (r.done) {
         streams.delete(id);
         post({ type: "done", id });
@@ -143,11 +170,12 @@ export function serveNostrIDB(
           type: "next",
           id,
           value: r.value,
-          meta: metadataFor("pages", r.value),
+          meta: metadataFor(stream.method!, r.value),
         });
     } catch (error) {
-      streams.delete(id);
-      post({ type: "error", id, error: serializeError(error) });
+      const aborted = stream.controller.signal.aborted;
+      cancel(id);
+      if (!aborted) post({ type: "error", id, error: serializeError(error) });
     }
   }
 

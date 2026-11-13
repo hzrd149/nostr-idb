@@ -40,10 +40,10 @@ export const CALL_METHODS = [
 export type CallMethod = (typeof CALL_METHODS)[number];
 
 /**
- * Methods answered with a stream. `pages` is pulled one page at a time so at
- * most one page is buffered; `subscribe` pushes events as they arrive.
+ * Methods answered with a stream. `query` and `pages` are pulled one chunk
+ * at a time; `subscribe` pushes events as they arrive.
  */
-export const STREAM_METHODS = ["pages", "subscribe"] as const;
+export const STREAM_METHODS = ["query", "pages", "subscribe"] as const;
 export type StreamMethod = (typeof STREAM_METHODS)[number];
 
 /**

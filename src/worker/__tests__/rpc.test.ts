@@ -5,6 +5,7 @@ import type { NostrEvent } from "../../lib/nostr.js";
 import { NostrIDB } from "../../nostrdb/nostrdb.js";
 import { NostrIDBClient } from "../client.js";
 import { serveNostrIDB, serverMetadata } from "../server.js";
+import { type ClientMessage, type ServerMessage } from "../protocol.js";
 
 type Meta = { relays: string[] };
 const metaSymbol = Symbol("test-meta");
@@ -76,6 +77,139 @@ describe("NostrIDBClient over a MessageChannel", () => {
     await flush();
     expect((await client.replaceable(0, profile.pubkey))?.id).toBe(profile.id);
   });
+
+  it("pulls bounded query chunks only after the previous chunk is consumed", async () => {
+    const events = Array.from({ length: 205 }, (_, i) => {
+      const event = createTestEvent({ kind: 1, created_at: 1000 + i });
+      if (i % 2 === 0)
+        serverMetadata.attach!(event, { relays: [`wss://${i}`] });
+      return event;
+    });
+    const filters = [{ kinds: [1], limit: 205, search: "example" }];
+    const query = vi.spyOn(nostr, "query").mockResolvedValue(events);
+    const sent = vi.spyOn(channel.port2, "postMessage");
+    const post = channel.port1.postMessage.bind(channel.port1);
+    let pulls = 0;
+    let held: ClientMessage | undefined;
+    let paused = true;
+    vi.spyOn(channel.port1, "postMessage").mockImplementation(
+      (message: ClientMessage) => {
+        if (message.type === "pull" && ++pulls > 1 && paused) held = message;
+        else post(message);
+      },
+    );
+    const result = client.query(filters);
+    await expect.poll(() => !!held).toBe(true);
+    // An unrelated round trip is a barrier: no extra chunk is sent without a pull.
+    expect(await client.supports()).toEqual([]);
+    const chunks = () =>
+      sent.mock.calls
+        .map(([m]) => m as ServerMessage)
+        .filter((m) => m.type === "next");
+    expect(chunks()).toHaveLength(1);
+    expect(query).toHaveBeenCalledExactlyOnceWith(filters);
+
+    paused = false;
+    post(held!);
+    const received = await result;
+    expect(received.map((e) => e.id)).toEqual(events.map((e) => e.id));
+    expect(chunks().map((m) => m.value.length)).toEqual([100, 100, 5]);
+    for (let i = 0; i < received.length; i++)
+      expect(received[i][metaSymbol]).toEqual(
+        i % 2 === 0 ? { relays: [`wss://${i}`] } : undefined,
+      );
+  });
+
+  it("preserves real query limits, ordering, deduplication and pending events across chunks", async () => {
+    client.close();
+    client = new NostrIDBClient(channel.port1, { queryChunkSize: 2 });
+    for (let i = 0; i < 5; i++)
+      await nostr.add(createTestEvent({ kind: 1, created_at: 1000 + i }));
+    await flush();
+    // Keep the last event pending for both query implementations.
+    await nostr.stop();
+    await nostr.add(createTestEvent({ kind: 1, created_at: 2000 }));
+    const filters = [
+      { kinds: [1], limit: 4 },
+      { kinds: [1], since: 1003 },
+    ];
+    const expected = await nostr.query(filters);
+    const sent = vi.spyOn(channel.port2, "postMessage");
+    expect(await client.query(filters)).toEqual(structuredClone(expected));
+    expect(
+      sent.mock.calls
+        .filter(([m]) => m.type === "next")
+        .map(([m]) => m.value.length),
+    ).toEqual([2, 2]);
+    expect(await client.query({ kinds: [999] })).toEqual([]);
+  });
+
+  it("rejects query failures and cancels chunks when metadata restoration fails", async () => {
+    const query = vi
+      .spyOn(nostr, "query")
+      .mockRejectedValueOnce(new Error("query failed"));
+    await expect(client.query({ kinds: [1] })).rejects.toThrow("query failed");
+    client.close();
+    client = new NostrIDBClient(channel.port1, {
+      queryChunkSize: 1,
+      metadata: {
+        attach() {
+          throw new Error("bad metadata");
+        },
+      },
+    });
+    const event = createTestEvent({ kind: 1 });
+    serverMetadata.attach!(event, { relays: [] });
+    query.mockResolvedValue([event, event]);
+    const sent = vi.spyOn(channel.port1, "postMessage");
+    const replies = vi.spyOn(channel.port2, "postMessage");
+    await expect(client.query({ kinds: [1] })).rejects.toThrow("bad metadata");
+    expect(await client.supports()).toEqual([]);
+    expect(sent.mock.calls.some(([m]) => m.type === "cancel")).toBe(true);
+    expect(replies.mock.calls.filter(([m]) => m.type === "next")).toHaveLength(
+      1,
+    );
+  });
+
+  it("cancels an in-flight query when closed and discards its late result", async () => {
+    let resolve!: (events: NostrEvent[]) => void;
+    vi.spyOn(nostr, "query").mockImplementation(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const replies = vi.spyOn(channel.port2, "postMessage");
+    const rejected = expect(client.query({ kinds: [1] })).rejects.toThrow(
+      "closed",
+    );
+    await expect.poll(() => !!resolve).toBe(true);
+    const receivedCancel = new Promise<void>((done) => {
+      channel.port2.addEventListener("message", function listener(e) {
+        if (e.data.type !== "cancel") return;
+        channel.port2.removeEventListener("message", listener);
+        done();
+      });
+    });
+    client.close();
+    await rejected;
+    await receivedCancel;
+    resolve([createTestEvent({ kind: 1 })]);
+    client = new NostrIDBClient(channel.port1);
+    expect(await client.supports()).toEqual([]);
+    expect(replies.mock.calls.filter(([m]) => m.type === "next")).toHaveLength(
+      0,
+    );
+  });
+
+  it.each([0, -1, 1.5, Infinity, NaN])(
+    "rejects invalid query chunk size %s",
+    (queryChunkSize) => {
+      expect(
+        () => new NostrIDBClient(channel.port1, { queryChunkSize }),
+      ).toThrow("queryChunkSize must be a positive safe integer");
+    },
+  );
 
   it("carries metadata both ways", async () => {
     const explicit = createTestEvent({ kind: 1 }) as MetaEvent;
@@ -344,6 +478,9 @@ describe("NostrIDBClient with a Worker", () => {
         .poll(async () => (await client.event(event.id))?.id)
         .toBe(event.id);
       expect(await client.count({ kinds: [1] })).toBe(1);
+      expect((await client.query({ kinds: [1] })).map((e) => e.id)).toEqual([
+        event.id,
+      ]);
     } finally {
       client.close();
       worker.terminate();
