@@ -12,6 +12,15 @@ import {
 } from "../../src/index.ts";
 import { NostrIDBClient } from "../../src/worker/index.ts";
 import { track } from "./activity.ts";
+import { SnortStore } from "./snort-store.ts";
+
+/**
+ * Where a database runs:
+ * - main: NostrIDB on the page
+ * - worker: NostrIDB in a dedicated worker behind NostrIDBClient
+ * - snort: @snort/worker-relay (SQLite-WASM on OPFS) for comparison
+ */
+export type Backend = "main" | "worker" | "snort";
 
 export type ExplorerOptions = Required<
   Pick<
@@ -39,7 +48,11 @@ export type DBSnapshot = {
   /** name of the active database, empty when no database is open */
   name: string;
   options: ExplorerOptions;
-  /** whether the active database runs in a dedicated worker */
+  backend: Backend;
+  /**
+   * whether the active database runs off the main thread, so its raw
+   * IndexedDB handle and NostrIDB internals are not available
+   */
   worker: boolean;
   /**
    * The public database API: the NostrIDB instance itself on the main
@@ -63,13 +76,14 @@ type Saved = {
   tabs: string[];
   active: string;
   options: Record<string, ExplorerOptions>;
-  /** databases that run in a dedicated worker */
-  workers?: Record<string, boolean>;
+  /** backend of each database, "main" when missing */
+  backends: Record<string, Backend>;
 };
 
 type Connection =
   | { kind: "main"; store: NostrIDB; db: NostrIDBDatabase; nostr: NostrIDB }
-  | { kind: "worker"; store: NostrIDBClient; worker: Worker };
+  | { kind: "worker"; store: NostrIDBClient; worker: Worker }
+  | { kind: "snort"; store: SnortStore };
 
 /** Starts a dedicated worker serving one database, see db-worker.ts */
 async function startWorker(name: string, options: ExplorerOptions) {
@@ -123,17 +137,25 @@ function loadSaved(): Saved {
         tabs: [saved.name],
         active: saved.name,
         options: { [saved.name]: { ...DEFAULT_OPTIONS, ...saved.options } },
-        workers: {},
+        backends: {},
       };
     const tabs: string[] = Array.isArray(saved.tabs) ? saved.tabs : [];
     return {
       tabs,
       active: tabs.includes(saved.active) ? saved.active : (tabs[0] ?? ""),
       options: saved.options ?? {},
-      workers: saved.workers ?? {},
+      backends: {
+        // migrate the old worker flags
+        ...Object.fromEntries(
+          Object.entries(saved.workers ?? {})
+            .filter(([, w]) => w)
+            .map(([name]) => [name, "worker" as const]),
+        ),
+        ...saved.backends,
+      },
     };
   } catch {
-    return { tabs: [], active: "", options: {}, workers: {} };
+    return { tabs: [], active: "", options: {}, backends: {} };
   }
 }
 
@@ -151,6 +173,7 @@ class DBManager {
   private listeners = new Set<() => void>();
   private connections = new Map<string, Connection>();
   private pending = new Map<string, Promise<Connection>>();
+  private snortQueue: Promise<unknown> = Promise.resolve();
   private saved: Saved;
   snapshot: DBSnapshot;
 
@@ -158,10 +181,16 @@ class DBManager {
     this.saved = loadSaved();
     // first run: start with a default database tab
     if (!localStorage.getItem(STORAGE_KEY))
-      this.saved = { tabs: [DEFAULT_NAME], active: DEFAULT_NAME, options: {} };
+      this.saved = {
+        tabs: [DEFAULT_NAME],
+        active: DEFAULT_NAME,
+        options: {},
+        backends: {},
+      };
     this.snapshot = {
       name: this.saved.active,
       options: this.optionsFor(this.saved.active),
+      backend: this.backendOf(this.saved.active),
       worker: this.isWorker(this.saved.active),
       store: null,
       db: null,
@@ -177,9 +206,22 @@ class DBManager {
     return { ...DEFAULT_OPTIONS, ...this.saved.options[name] };
   }
 
-  /** whether a database is set to run in a worker */
+  /** the backend a database is set to run on */
+  backendOf(name: string): Backend {
+    return this.saved.backends[name] ?? "main";
+  }
+
+  /** whether a database runs off the main thread */
   isWorker(name: string) {
-    return !!this.saved.workers?.[name];
+    return this.backendOf(name) !== "main";
+  }
+
+  /** names of the snort worker-relay databases, which IndexedDB does not list */
+  snortDatabases() {
+    return Object.entries(this.saved.backends)
+      .filter(([, b]) => b === "snort")
+      .map(([name]) => name)
+      .sort();
   }
 
   private persist() {
@@ -191,10 +233,12 @@ class DBManager {
     const conn = this.connections.get(name);
     const swapped =
       name !== this.snapshot.name || conn?.store !== this.snapshot.store;
+    const backend = conn ? conn.kind : this.backendOf(name);
     this.snapshot = {
       name,
       options: this.optionsFor(name),
-      worker: conn ? conn.kind === "worker" : this.isWorker(name),
+      backend,
+      worker: backend !== "main",
       store: conn?.store ?? null,
       db: conn?.kind === "main" ? conn.db : null,
       nostr: conn?.kind === "main" ? conn.nostr : null,
@@ -236,19 +280,23 @@ class DBManager {
     let pending = this.pending.get(name);
     if (!pending) {
       const options = this.optionsFor(name);
-      const connecting: Promise<Connection> = this.isWorker(name)
-        ? track("db", `new Worker() → openDB("${name}")`, () =>
-            startWorker(name, options),
-          )
-        : track(
-            "db",
-            `openDB("${name}")`,
-            () => openDB(name),
-            (db) => `v${db.version}`,
-          ).then((db) => {
-            const nostr = new NostrIDB(db, options);
-            return { kind: "main", store: nostr, db, nostr };
-          });
+      const backend = this.backendOf(name);
+      const connecting: Promise<Connection> =
+        backend === "snort"
+          ? this.connectSnort(name)
+          : backend === "worker"
+            ? track("db", `new Worker() → openDB("${name}")`, () =>
+                startWorker(name, options),
+              )
+            : track(
+                "db",
+                `openDB("${name}")`,
+                () => openDB(name),
+                (db) => `v${db.version}`,
+              ).then((db) => {
+                const nostr = new NostrIDB(db, options);
+                return { kind: "main", store: nostr, db, nostr };
+              });
       pending = connecting
         .then((conn) => {
           this.connections.set(name, conn);
@@ -260,12 +308,41 @@ class DBManager {
     return pending;
   }
 
+  /**
+   * Start a snort worker-relay. Its OPFS pool can only be held by one worker
+   * in the origin, so any other open snort database is closed first.
+   */
+  private connectSnort(name: string): Promise<Connection> {
+    // serialize snort opens so two never wait on each other for the pool
+    const next = this.snortQueue.then(async () => {
+      for (const [other, conn] of this.connections) {
+        if (other === name || conn.kind !== "snort") continue;
+        await track(
+          "db",
+          `close("${other}")`,
+          () => this.disconnect(other),
+          undefined,
+          "the snort OPFS pool holds one database at a time",
+        );
+      }
+      const store = await track("db", `WorkerRelay.init("${name}.db")`, () =>
+        new SnortStore(name).init(),
+      );
+      const conn: Connection = { kind: "snort", store };
+      this.connections.set(name, conn);
+      return conn;
+    });
+    this.snortQueue = next.catch(() => {});
+    return next;
+  }
+
   private async disconnect(name: string) {
     await this.pending.get(name)?.catch(() => {});
     const conn = this.connections.get(name);
     if (!conn) return;
     this.connections.delete(name);
     if (conn.kind === "worker") return stopWorker(conn);
+    if (conn.kind === "snort") return conn.store.close();
     await conn.nostr.stop();
     conn.db.close();
   }
@@ -277,15 +354,15 @@ class DBManager {
 
   /**
    * Open a database as a tab (creating it if needed) and make it active.
-   * `worker` picks the thread for a database that is not already open.
+   * `backend` picks where a database that is not already open runs.
    */
-  async open(name: string, worker?: boolean) {
+  async open(name: string, backend?: Backend) {
     name = name.trim();
     if (!name) return;
-    if (worker !== undefined && !this.connections.has(name))
+    if (backend !== undefined && !this.connections.has(name))
       this.saved = {
         ...this.saved,
-        workers: { ...this.saved.workers, [name]: worker },
+        backends: { ...this.saved.backends, [name]: backend },
       };
     if (!this.saved.tabs.includes(name))
       this.saved = { ...this.saved, tabs: [...this.saved.tabs, name] };
@@ -315,21 +392,30 @@ class DBManager {
 
   /** Close a database tab and delete the database */
   async remove(name: string) {
+    const snort = this.backendOf(name) === "snort";
+    // the worker relay cannot delete one database file without wiping the
+    // whole OPFS pool, so empty it instead
+    if (snort) {
+      const conn = await this.connect(name);
+      await track("delete", `worker-relay: delete all events`, () =>
+        conn.store.deleteAllEvents(),
+      );
+    }
     await this.close(name);
     const { [name]: _, ...options } = this.saved.options;
-    const { [name]: __, ...workers } = this.saved.workers ?? {};
-    this.saved = { ...this.saved, options, workers };
+    const { [name]: __, ...backends } = this.saved.backends;
+    this.saved = { ...this.saved, options, backends };
     this.persist();
-    await track("db", `deleteDB("${name}")`, () => deleteDB(name));
+    if (!snort) await track("db", `deleteDB("${name}")`, () => deleteDB(name));
     this.emit(true);
   }
 
   /** Change a database's options and reconnect it */
-  async reopen(name: string, options: ExplorerOptions, worker: boolean) {
+  async reopen(name: string, options: ExplorerOptions, backend: Backend) {
     this.saved = {
       ...this.saved,
       options: { ...this.saved.options, [name]: options },
-      workers: { ...this.saved.workers, [name]: worker },
+      backends: { ...this.saved.backends, [name]: backend },
     };
     await this.disconnect(name);
     this.emit();
@@ -340,6 +426,14 @@ class DBManager {
   async drop() {
     const name = this.saved.active;
     if (!name) return;
+    if (this.backendOf(name) === "snort") {
+      const conn = await this.connect(name);
+      await track("delete", `worker-relay: delete all events`, () =>
+        conn.store.deleteAllEvents(),
+      );
+      this.emit();
+      return;
+    }
     await this.disconnect(name);
     this.emit();
     await track("db", `deleteDB("${name}")`, () => deleteDB(name));

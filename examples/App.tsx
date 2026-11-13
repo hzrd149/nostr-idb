@@ -34,7 +34,7 @@ const TABS: { tab: Tab; icon: LucideIcon; label: string; key: string }[] = [
 
 function Header() {
   const stats = useLiveStats(1000);
-  const { worker } = useDB();
+  const { worker, backend } = useDB();
   const lag = useFrameLag();
 
   return (
@@ -45,7 +45,21 @@ function Header() {
       <span className="header-stats">
         {stats && (
           <>
-            <span title="events in IndexedDB">
+            {backend === "snort" && (
+              <span
+                className="badge"
+                title="@snort/worker-relay: SQLite-WASM on OPFS in a worker"
+              >
+                snort worker-relay
+              </span>
+            )}
+            <span
+              title={
+                backend === "snort"
+                  ? "events in the worker-relay's SQLite database"
+                  : "events in IndexedDB"
+              }
+            >
               <b>{fmtNum(stats.events)}</b> events
             </span>
             {/* NostrIDB internals are only readable on the main thread */}
@@ -80,9 +94,11 @@ function Header() {
         <span
           title={
             "Longest gap between frames in the last second. " +
-            (worker
-              ? "This database runs in a worker, so its work does not block the page."
-              : "This database runs on the main thread, so heavy work stalls the page.")
+            (backend === "snort"
+              ? "This database runs in the snort worker-relay's worker, so its work does not block the page."
+              : worker
+                ? "This database runs in a worker, so its work does not block the page."
+                : "This database runs on the main thread, so heavy work stalls the page.")
           }
           className={lag > 200 ? "bad" : lag > 50 ? "warn" : ""}
         >

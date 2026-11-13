@@ -41,7 +41,7 @@ export function QueryPage({
   request: { filters: Filter[]; nonce: number } | null;
   active: boolean;
 }) {
-  const { ready, generation, worker } = useDB();
+  const { ready, generation, worker, backend } = useDB();
   const [filters, setFilters] = useState<Filter[]>([
     { kinds: [1], limit: 100 },
   ]);
@@ -290,9 +290,11 @@ export function QueryPage({
           <label
             className="check"
             title={
-              worker
-                ? "the index cache lives in the worker; main thread only"
-                : "clear the index cache before every run"
+              backend === "snort"
+                ? "the snort worker-relay has no index cache"
+                : worker
+                  ? "the index cache lives in the worker; main thread only"
+                  : "clear the index cache before every run"
             }
           >
             <input

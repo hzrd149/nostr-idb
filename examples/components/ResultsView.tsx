@@ -202,7 +202,7 @@ function EventDetail({
   onDeleted: (uid: string) => void;
 }) {
   const { openQuery } = useApp();
-  const { db, nostr, worker } = useDB();
+  const { db, nostr, worker, backend } = useDB();
   const uid = getEventUID(event);
   const [stored, setStored] = useState<{
     tags?: string[];
@@ -325,7 +325,11 @@ function EventDetail({
 
           <div className="stored">
             <div className="stored-title">IndexedDB record</div>
-            {worker ? (
+            {backend === "snort" ? (
+              <span className="muted">
+                stored by the snort worker-relay in SQLite, not IndexedDB
+              </span>
+            ) : worker ? (
               <span className="muted">
                 inside the worker; switch this database to the main thread to
                 inspect raw records

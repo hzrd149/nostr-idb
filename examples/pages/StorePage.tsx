@@ -47,7 +47,7 @@ async function waitForQueue() {
 }
 
 export function StorePage() {
-  const { ready, worker } = useDB();
+  const { ready, worker, backend } = useDB();
   const [gen, setGen] = useState<GeneratorOptions>(DEFAULT_GENERATOR);
   const [count, setCount] = useState(10_000);
   const [batchSize, setBatchSize] = useState(1000);
@@ -189,7 +189,15 @@ export function StorePage() {
           wide
           options={
             worker
-              ? [{ value: "nostr.add", label: "client.add(event) → worker" }]
+              ? [
+                  {
+                    value: "nostr.add",
+                    label:
+                      backend === "snort"
+                        ? "workerRelay.event(event)"
+                        : "client.add(event) → worker",
+                  },
+                ]
               : [
                   { value: "addEvents", label: "addEvents(db, batch)" },
                   { value: "nostr.add", label: "nostr.add(event)" },

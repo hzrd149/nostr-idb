@@ -15,4 +15,19 @@ export default defineConfig({
   build: {
     target: "es2022",
   },
+  worker: {
+    // the snort worker-relay worker uses code splitting
+    format: "es",
+  },
+  optimizeDeps: {
+    // sqlite-wasm loads its .wasm relative to its own module, which breaks
+    // when pre-bundled
+    exclude: ["@sqlite.org/sqlite-wasm"],
+    // the worker-relay worker is loaded from source, so pre-bundle its
+    // CommonJS dependencies for dev
+    include: [
+      "@snort/worker-relay > eventemitter3",
+      "@snort/worker-relay > uuid",
+    ],
+  },
 });

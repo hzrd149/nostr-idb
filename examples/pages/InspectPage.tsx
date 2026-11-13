@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Cpu, FileDown, Scissors } from "lucide-react";
+import { Cpu, FileDown, HardDrive, Scissors } from "lucide-react";
 import {
   clearDB,
   countEventsByKind,
@@ -17,6 +17,7 @@ import {
 import { begin, track } from "../lib/activity.ts";
 import { useApp } from "../lib/app.ts";
 import { manager, useDB, useLiveStats } from "../lib/db.ts";
+import { SnortStore } from "../lib/snort-store.ts";
 import {
   fmtBytes,
   fmtNum,
@@ -35,7 +36,79 @@ type Data = {
 type TagStats = { top: [string, number][]; distinct: number; total: number };
 type Timeline = { days: number[]; start: number };
 
+/** The worker-relay only reports event counts per kind */
+function SnortInspect({ active }: { active: boolean }) {
+  const { store, name, generation } = useDB();
+  const { openQuery } = useApp();
+  const live = useLiveStats(1000);
+  const [kinds, setKinds] = useState<[number, number][] | null>(null);
+
+  const load = useCallback(async () => {
+    if (!(store instanceof SnortStore)) return;
+    const summary = await track(
+      "inspect",
+      "worker-relay.summary()",
+      () => store.summary(),
+      (s) => `${Object.keys(s).length} kinds`,
+    );
+    setKinds(
+      Object.entries(summary)
+        .map(([k, n]) => [Number(k), n] as [number, number])
+        .sort((a, b) => b[1] - a[1]),
+    );
+  }, [store]);
+
+  useEffect(() => {
+    if (active) load().catch(() => {});
+  }, [active, load, generation]);
+
+  return (
+    <div className="page inspect">
+      <div className="side">
+        <div className="stats col">
+          <Stat label="events" value={fmtNum(live?.events ?? 0)} />
+          <Stat label="origin storage" value={fmtBytes(live?.usage)} />
+        </div>
+        <p className="muted">
+          <HardDrive size={16} /> {name} runs on @snort/worker-relay
+          (SQLite-WASM on OPFS). It only reports counts per kind, so the
+          IndexedDB tools on this page are not available.
+        </p>
+        <ConfirmButton disabled={!store} onConfirm={() => manager.drop()}>
+          delete all events
+        </ConfirmButton>
+      </div>
+      <div className="main">
+        <Section
+          title={`kinds · ${kinds?.length ?? 0}`}
+          right={
+            <button className="btn" onClick={load}>
+              refresh
+            </button>
+          }
+        >
+          <HBars
+            items={(kinds ?? []).slice(0, 30).map(([k, n]) => ({
+              key: String(k),
+              label: <KindBadge kind={k} />,
+              value: n,
+              color: kindColor(k),
+              onClick: () => openQuery([{ kinds: [k], limit: 500 }]),
+            }))}
+          />
+        </Section>
+      </div>
+    </div>
+  );
+}
+
 export function InspectPage({ active }: { active: boolean }) {
+  const { backend } = useDB();
+  if (backend === "snort") return <SnortInspect active={active} />;
+  return <IDBInspect active={active} />;
+}
+
+function IDBInspect({ active }: { active: boolean }) {
   const { ready, generation, name, worker, options } = useDB();
   const { openQuery } = useApp();
   const live = useLiveStats(1000);
@@ -157,7 +230,7 @@ export function InspectPage({ active }: { active: boolean }) {
           <div className="btn-row">
             <button
               className="btn primary"
-              onClick={() => manager.reopen(name, options, false)}
+              onClick={() => manager.reopen(name, options, "main")}
             >
               move to main thread
             </button>
