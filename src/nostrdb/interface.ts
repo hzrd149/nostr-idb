@@ -1,5 +1,6 @@
 import type { StoredEvent } from "../lib/nostr.js";
 import type { Filter } from "../lib/nostr.js";
+import type { QueryPage, QueryPageOptions } from "../database/pagination.js";
 
 /**
  * Standard feature flag strings for supports() checks.
@@ -37,6 +38,24 @@ export interface INostrIDB<TEvent extends StoredEvent = StoredEvent> {
 
   /** Get events by filters */
   query(filters: Filter | Filter[]): Promise<TEvent[]>;
+
+  /** Read a bounded page of committed events, newest first by default. */
+  queryPage(
+    filters?: Filter | Filter[],
+    options?: QueryPageOptions,
+  ): Promise<QueryPage<TEvent>>;
+
+  /** Traverse committed events as bounded pages with short-lived transactions. */
+  pages(
+    filters?: Filter | Filter[],
+    options?: QueryPageOptions,
+  ): AsyncGenerator<QueryPage<TEvent>, void, undefined>;
+
+  /** Traverse committed events with at most one page buffered. */
+  iterate(
+    filters?: Filter | Filter[],
+    options?: QueryPageOptions,
+  ): AsyncGenerator<TEvent, void, undefined>;
 
   /** Subscribe to events in the database based on filters */
   subscribe(

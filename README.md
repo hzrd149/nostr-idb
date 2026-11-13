@@ -94,8 +94,59 @@ An empty filter array (`[]`) remains invalid.
 
 Time filters such as `{ until: timestamp, limit: 100 }` also match all kinds.
 `until` is inclusive: timestamp-only pagination can repeat events, or skip events
-sharing the boundary timestamp if you subtract one second. There is currently no
-continuation-cursor API.
+sharing the boundary timestamp if you subtract one second. Use cursor pagination
+for reliable continuation through timestamp ties.
+
+### Cursor pagination and finite traversal
+
+```ts
+let cursor;
+do {
+  const page = await db.queryPage({ kinds: [1] }, { pageSize: 100, cursor });
+  await processBatch(page.events);
+  cursor = page.nextCursor;
+} while (cursor);
+
+// Omit filters (or use {}) to traverse all committed events.
+for await (const event of db.iterate(undefined, { pageSize: 500 })) {
+  await processEvent(event);
+}
+
+// Page-oriented generators also support early break and cancellation.
+for await (const page of db.pages({}, { signal: controller.signal })) {
+  await processBatch(page.events);
+}
+```
+
+- `queryPage(filters?, options?)` returns `{ events, nextCursor, done, scanned }`.
+  `pages()` yields these pages; `iterate()` yields individual events and finishes.
+- Defaults: `pageSize: 100`, `scanLimit: 4096`, `direction: "prev"` (newest first).
+  `"next"` reads oldest first. Timestamp ties are ordered by stored UID in the same
+  direction. Both sizes must be positive safe integers.
+- Each page examines at most `scanLimit` candidate rows and returns at most
+  `pageSize` events. Sparse filters can produce **empty pages with a cursor**;
+  only `done` or absence of `nextCursor` means completion.
+- Cursors are opaque serializable strings tied to database name/version, filters,
+  and direction. Keep these unchanged when resuming; page/scan sizes can change.
+  Do not reuse cursors after clearing or recreating a database.
+- Filters have OR semantics across an array, with overlapping matches returned
+  once. `[]` is invalid. `filter.limit` and `search` are rejected: use `pageSize`
+  and stop the iterator when enough events have been processed.
+- Reads include **committed data only**, not pending writes or cached bodies.
+  `add()` queues writes; if needed, await `db.writeQueue?.flush()` after adding
+  events before starting traversal. Reads do not populate event/index caches.
+- Transactions finish before a page is returned or yielded, so slow consumers
+  can safely await other work. Generators buffer only one page and do not prefetch.
+- This is live traversal, not a snapshot. Concurrent insertions, replacements,
+  deletions, and pruning can change later results; a replacement can move across
+  the cursor. Exactly-once traversal is guaranteed only for unchanged data.
+- The current reader seeks through the time index, with time bounds pushed down.
+  Other predicates are matched incrementally: memory stays bounded, but sparse
+  author/kind/tag filters may scan many rows. There is no full candidate-ID set.
+
+Low-level equivalents are `getEventsPage(db, filters?, options?)`,
+`iterateEventPages(db, filters?, options?)`, and `iterateEvents(db, filters?, options?)`,
+exported from both entry points with `QueryCursor`, `QueryPage`, and `QueryPageOptions`.
 
 ### Other exports
 

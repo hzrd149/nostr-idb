@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Cursor Pagination
+
+- Add committed-data `queryPage()`, `pages()`, and `iterate()` APIs with serializable continuation cursors, deterministic timestamp/UID ordering, both traversal directions, cancellation, and bounded page/scan sizes.
+- Export low-level `getEventsPage`, `iterateEventPages`, and `iterateEvents` helpers. Traversal uses short transactions without eager candidate sets or cache population; sparse filters may return empty continuation pages.
+
 ### Diagnostics
 
 - Replace the direct `debug` dependency with browser console logging and library-wide `configureDiagnostics({ debug, timing })` flags, both off by default.

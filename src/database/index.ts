@@ -1,5 +1,6 @@
 export * from "./database.js";
 export * from "./query-filter.js";
+export * from "./pagination.js";
 export * from "./query-misc.js";
 export * from "./insert.js";
 export * from "./prune.js";

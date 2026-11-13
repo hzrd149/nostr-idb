@@ -23,6 +23,12 @@ import { nanoid } from "../lib/nanoid.js";
 import { selectEventsForFilters } from "../utils.js";
 import { type INostrIDB } from "./interface.js";
 import { openDB } from "../database/database.js";
+import {
+  getEventsPage,
+  iterateEventPages,
+  iterateEvents,
+  type QueryPageOptions,
+} from "../database/pagination.js";
 
 /** Internal subscription handlers */
 type InternalHandlers = {
@@ -284,6 +290,30 @@ export class NostrIDB<
     } finally {
       end();
     }
+  }
+
+  /** Read a bounded page of committed events without warming caches. */
+  async queryPage(
+    filters: Filter | Filter[] = {},
+    options: QueryPageOptions = {},
+  ) {
+    return getEventsPage<TEvent>(await this.getDb(), filters, options);
+  }
+
+  /** Traverse committed events as pages; no transaction survives a yield. */
+  async *pages(
+    filters: Filter | Filter[] = {},
+    options: QueryPageOptions = {},
+  ) {
+    yield* iterateEventPages<TEvent>(await this.getDb(), filters, options);
+  }
+
+  /** Traverse committed events with at most one page buffered. */
+  async *iterate(
+    filters: Filter | Filter[] = {},
+    options: QueryPageOptions = {},
+  ) {
+    yield* iterateEvents<TEvent>(await this.getDb(), filters, options);
   }
 
   /** Subscribe to events in the database based on filters */
