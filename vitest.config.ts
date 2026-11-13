@@ -8,7 +8,11 @@ export default defineConfig({
     exclude: ["node_modules/**", "vitest-example/**"],
     browser: {
       enabled: true,
-      provider: playwright(),
+      provider: playwright({
+        launchOptions: {
+          executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+        },
+      }),
       instances: [{ browser: "chromium" }],
     },
     coverage: {

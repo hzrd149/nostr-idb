@@ -57,6 +57,16 @@ no Node-based `fake-indexeddb` polyfill. `src/__tests__/setup.ts` is intentional
 
 ---
 
+## Changelog and Releases
+
+- After making significant changes or adding features, validate the work and create a descriptive commit containing only the changes for that task; leave unrelated work untouched.
+- Record every change as an item under `Unreleased` in `CHANGELOG.md`, grouped under descriptive headings.
+- Bump the package version only when explicitly asked to cut a release.
+- Releases are manual: bump `package.json`, finalize the changelog into a versioned section while leaving a fresh `Unreleased` section, build and test, commit, create an annotated `vX.Y.Z` tag, push the commit and tag, then run `pnpm publish`.
+- See `README.md` for the release checklist. Do not tag, push, or publish unless requested.
+
+---
+
 ## TypeScript Configuration
 
 `tsconfig.json` key settings:

@@ -18,6 +18,13 @@
 
 - `IndexCache.lastUsed` now returns an ordering snapshot. Assign a modified snapshot back to update eviction order; mutating the returned array alone no longer changes the cache.
 
+### Maintenance
+
+- Instruct agents to validate and commit significant changes and new features without including unrelated work.
+- Update Vitest browser and coverage packages to 4.1.12 to address critical browser-mode and moderate mocker vulnerabilities.
+- Remove unused Svelte development dependencies and configuration from the React-based examples setup.
+- Replace Changesets with changelog-based change tracking and a manual release workflow using `pnpm publish`.
+
 ## 5.1.1
 
 ### Patch Changes

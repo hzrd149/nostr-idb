@@ -1,0 +1,5 @@
+allowBuilds:
+  esbuild: true
+overrides:
+  '@vitest/browser@>=4.0.0 <4.1.10': ^4.1.10
+  '@vitest/mocker@>=2.1.0-beta.7 <4.1.12': ^4.1.12

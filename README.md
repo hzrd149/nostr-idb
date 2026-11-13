@@ -18,6 +18,44 @@ Live Examples: https://hzrd149.github.io/nostr-idb/
 - `NostrIDB` class with NIP-DB-compatible API (`query`, `count`, `subscribe` as AsyncGenerator)
 - NIP-91 AND-filter support (`&t` keys)
 
+## Development and CI
+
+The locked Nix flake provides Node.js 24, pnpm 10, and Chromium on Linux:
+
+```sh
+nix develop
+pnpm install --frozen-lockfile
+pnpm build
+pnpm test:run --browser.headless
+```
+
+Nix supplies Chromium through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; outside
+the Nix shell, Vitest uses Playwright's installed browser as usual.
+
+Nostr CI runs `.ngit/act/workflows/test.yml` on pushes and pull requests.
+For coordinators requiring a service request, enable the repository with
+`ngit ci request <coordinator-npub> --json` after publishing the workflow. Check results with
+`ngit ci status <commit> --json`.
+
+## Changelog and releases
+
+Record each change as an item under `Unreleased` in [CHANGELOG.md](./CHANGELOG.md)
+as part of the change itself. Group related items under descriptive headings.
+Package versions are bumped only when cutting a release.
+
+To release from a clean working tree with all intended changes committed:
+
+1. Bump `version` in `package.json` to the next semantic version.
+2. Finalize the `Unreleased` notes under a heading matching that version, and
+   leave a new, empty `Unreleased` section at the top.
+3. Run `pnpm install --frozen-lockfile`, `pnpm build`, and
+   `pnpm test:run --browser.headless`.
+4. Commit the version bump and changelog, then create an annotated Git tag
+   matching the package version (for example, `git tag -a vX.Y.Z -m "vX.Y.Z"`).
+5. Push the release commit and tag to the Git repository (and any maintained
+   mirrors).
+6. Publish the built package to npm with `pnpm publish`.
+
 ## NostrIDB Class
 
 The `NostrIDB` class is the main interface for working with nostr events in IndexedDB. It provides a NIP-DB-compatible API with automatic batching, caching, and subscription management.
