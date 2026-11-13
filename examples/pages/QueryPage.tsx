@@ -3,8 +3,6 @@ import {
   countEventsByKind,
   countEventsByPubkeys,
   getEventUID,
-  getEventsForFilters,
-  getIdsForFilters,
   type Filter,
   type StoredEvent,
 } from "../../src/index.ts";
@@ -15,7 +13,9 @@ import {
   type FilterHints,
 } from "../components/FilterBuilder.tsx";
 import { ResultsView } from "../components/ResultsView.tsx";
-import { ConfirmButton, Segmented } from "../components/ui.tsx";
+import { ConfirmButton } from "../components/ui.tsx";
+import { EngineSelect } from "../components/EngineSelect.tsx";
+import { ENGINES, runEngine, type Engine } from "../lib/engines.ts";
 import { begin, track } from "../lib/activity.ts";
 import { manager, useDB } from "../lib/db.ts";
 import {
@@ -26,48 +26,6 @@ import {
   summarize,
 } from "../lib/nostr.ts";
 
-export type Engine = "query" | "raw" | "nocache" | "count" | "ids";
-
-export const ENGINES: { value: Engine; label: string; title: string }[] = [
-  { value: "query", label: "NostrIDB.query", title: "nostr.query(filters)" },
-  {
-    value: "raw",
-    label: "getEventsForFilters",
-    title: "getEventsForFilters(db, filters, indexCache)",
-  },
-  {
-    value: "nocache",
-    label: "no cache",
-    title: "getEventsForFilters(db, filters) — no index cache",
-  },
-  { value: "count", label: "count", title: "nostr.count(filters)" },
-  {
-    value: "ids",
-    label: "ids",
-    title: "getIdsForFilters(db, filters, indexCache)",
-  },
-];
-
-/** Runs filters against an engine, returning events or a number */
-export async function runEngine(
-  engine: Engine,
-  filters: Filter[],
-): Promise<StoredEvent[] | number> {
-  const { db, nostr } = manager;
-  switch (engine) {
-    case "query":
-      return nostr.query(filters);
-    case "raw":
-      return getEventsForFilters(db, filters, nostr.indexCache);
-    case "nocache":
-      return getEventsForFilters(db, filters);
-    case "count":
-      return nostr.count(filters);
-    case "ids":
-      return (await getIdsForFilters(db, filters, nostr.indexCache)).size;
-  }
-}
-
 type HistoryEntry = {
   filters: Filter[];
   engine: Engine;
@@ -77,11 +35,15 @@ type HistoryEntry = {
 
 export function QueryPage({
   request,
+  active,
 }: {
   request: { filters: Filter[]; nonce: number } | null;
+  active: boolean;
 }) {
   const { ready, generation } = useDB();
-  const [filters, setFilters] = useState<Filter[]>([{ kinds: [1], limit: 100 }]);
+  const [filters, setFilters] = useState<Filter[]>([
+    { kinds: [1], limit: 100 },
+  ]);
   const [engine, setEngine] = useState<Engine>("query");
   const [results, setResults] = useState<StoredEvent[]>([]);
   const [last, setLast] = useState<HistoryEntry | null>(null);
@@ -102,8 +64,18 @@ export function QueryPage({
   const loadHints = useCallback(async () => {
     if (!manager.snapshot.ready) return;
     const [kinds, authors] = await Promise.all([
-      track("query", "countEventsByKind()", () => countEventsByKind(manager.db), (r) => `${Object.keys(r).length} kinds`),
-      track("query", "countEventsByPubkeys()", () => countEventsByPubkeys(manager.db), (r) => `${Object.keys(r).length} authors`),
+      track(
+        "query",
+        "countEventsByKind()",
+        () => countEventsByKind(manager.db),
+        (r) => `${Object.keys(r).length} kinds`,
+      ),
+      track(
+        "query",
+        "countEventsByPubkeys()",
+        () => countEventsByPubkeys(manager.db),
+        (r) => `${Object.keys(r).length} authors`,
+      ),
     ]);
     setHints({
       kinds: Object.entries(kinds)
@@ -114,8 +86,8 @@ export function QueryPage({
   }, []);
 
   useEffect(() => {
-    if (ready) loadHints();
-  }, [ready, generation, loadHints]);
+    if (ready && active) loadHints();
+  }, [ready, active, generation, loadHints]);
 
   const run = useCallback(
     async (f: Filter[] = filters, e: Engine = engine) => {
@@ -130,7 +102,10 @@ export function QueryPage({
           "query",
           label,
           () => runEngine(e, clean),
-          (r) => (typeof r === "number" ? `${fmtNum(r)}` : `${fmtNum(r.length)} events`),
+          (r) =>
+            typeof r === "number"
+              ? `${fmtNum(r)}`
+              : `${fmtNum(r.length)} events`,
           filterSummary(clean),
         );
         const ms = performance.now() - t0;
@@ -174,10 +149,14 @@ export function QueryPage({
         const t0 = performance.now();
         await runEngine(engine, clean);
         times.push(performance.now() - t0);
-        if (i % 5 === 4 || i === benchN - 1) setBench({ times: [...times], cold });
+        if (i % 5 === 4 || i === benchN - 1)
+          setBench({ times: [...times], cold });
       }
       const s = summarize(times);
-      finish("ok", `p50 ${fmtMs(s.p50)} p95 ${fmtMs(s.p95)} max ${fmtMs(s.max)}`);
+      finish(
+        "ok",
+        `p50 ${fmtMs(s.p50)} p95 ${fmtMs(s.p95)} max ${fmtMs(s.max)}`,
+      );
     } catch (err) {
       finish("error", String(err));
     } finally {
@@ -192,7 +171,11 @@ export function QueryPage({
       return;
     }
     const clean = filters.map(cleanFilter);
-    const finish = begin("subscribe", "nostr.subscribe()", filterSummary(clean));
+    const finish = begin(
+      "subscribe",
+      "nostr.subscribe()",
+      filterSummary(clean),
+    );
     const seen = new Set<string>();
     const buffer: StoredEvent[] = [];
     let count = 0;
@@ -251,12 +234,7 @@ export function QueryPage({
           onSubmit={() => run()}
         />
 
-        <Segmented
-          value={engine}
-          onChange={setEngine}
-          options={ENGINES}
-          size="sm"
-        />
+        <EngineSelect value={engine} onChange={setEngine} />
 
         <div className="btn-row">
           <button
@@ -275,13 +253,20 @@ export function QueryPage({
           >
             {live ? `■ live ${live.count}` : "◉ subscribe"}
           </button>
-          <ConfirmButton disabled={!ready || running} onConfirm={deleteMatching}>
+          <ConfirmButton
+            disabled={!ready || running}
+            onConfirm={deleteMatching}
+          >
             delete matching
           </ConfirmButton>
         </div>
 
         <div className="bench-row">
-          <button className="btn" disabled={!ready || running} onClick={runBench}>
+          <button
+            className="btn"
+            disabled={!ready || running}
+            onClick={runBench}
+          >
             ⏱ bench
           </button>
           <input
@@ -292,7 +277,11 @@ export function QueryPage({
           />
           <span className="muted">×</span>
           <label className="check">
-            <input type="checkbox" checked={cold} onChange={(e) => setCold(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={cold}
+              onChange={(e) => setCold(e.target.checked)}
+            />
             cold cache
           </label>
         </div>
@@ -302,7 +291,9 @@ export function QueryPage({
             <Bars
               values={bench.times}
               height={50}
-              color={(v) => (v > benchStats.p95 ? "var(--yellow)" : "var(--accent)")}
+              color={(v) =>
+                v > benchStats.p95 ? "var(--yellow)" : "var(--accent)"
+              }
             />
             <div className="bench-stats">
               <span>min {fmtMs(benchStats.min)}</span>

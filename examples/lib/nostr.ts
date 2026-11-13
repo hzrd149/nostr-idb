@@ -18,6 +18,17 @@ export const KIND_NAMES: Record<number, string> = {
   30078: "app data",
 };
 
+/** Build a single tag filter */
+export function tagFilter(
+  letter: string,
+  value: string,
+  limit?: number,
+): Filter {
+  const f: Record<string, unknown> = { [`#${letter}`]: [value] };
+  if (limit) f.limit = limit;
+  return f as Filter;
+}
+
 export function kindName(kind: number) {
   return KIND_NAMES[kind] ?? "";
 }

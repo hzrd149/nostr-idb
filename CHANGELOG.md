@@ -31,6 +31,10 @@
 
 - `IndexCache.lastUsed` now returns an ordering snapshot. Assign a modified snapshot back to update eviction order; mutating the returned array alone no longer changes the cache.
 
+### Examples
+
+- Rebuild the example app as a browser database manager for stress testing: a visual filter builder synced with JSON, switchable query engines with benchmarking and live subscriptions, an event generator and JSON/JSONL import, multi-relay import with backfill paging, stress workloads (query storm, read+write, subscription fan-out, cold vs warm index cache), database inspection and maintenance, and an expandable activity log that times every action.
+
 ### Maintenance
 
 - Remove unused direct `esbuild` and `fake-indexeddb` development dependencies; Vite manages esbuild and browser tests use native IndexedDB.

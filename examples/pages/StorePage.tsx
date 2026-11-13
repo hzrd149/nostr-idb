@@ -1,13 +1,15 @@
 import React, { useRef, useState } from "react";
-import {
-  addEvents,
-  getEventUID,
-  validateEvent,
-  type StoredEvent,
-} from "../../src/index.ts";
+import { addEvents, getEventUID, type StoredEvent } from "../../src/index.ts";
+import { validateEvent } from "../../src/lib/nostr.ts";
 import { Bars } from "../components/charts.tsx";
 import { ResultsView } from "../components/ResultsView.tsx";
-import { NumberField, Progress, Segmented, Stat } from "../components/ui.tsx";
+import {
+  Field,
+  NumberField,
+  Progress,
+  Segmented,
+  Stat,
+} from "../components/ui.tsx";
 import { begin } from "../lib/activity.ts";
 import { manager, pendingWrites, useDB } from "../lib/db.ts";
 import {
@@ -89,7 +91,8 @@ export function StorePage() {
         else for (const e of batch) await manager.nostr.add(e);
         state.batches.push(performance.now() - t0);
         state.done += batch.length;
-        if (kept.length < 2000) kept.push(...batch.slice(0, 2000 - kept.length));
+        if (kept.length < 2000)
+          kept.push(...batch.slice(0, 2000 - kept.length));
         // yield to the UI
         if (performance.now() - lastPaint > 60) {
           lastPaint = performance.now();
@@ -163,7 +166,7 @@ export function StorePage() {
           label="events"
           value={count}
           onChange={setCount}
-          presets={[100, 1000, 10_000, 50_000, 100_000]}
+          presets={[1000, 10_000, 50_000, 100_000]}
         />
         <NumberField
           label="batch"
@@ -172,6 +175,37 @@ export function StorePage() {
           onChange={(v) => setBatchSize(Math.max(1, v))}
           presets={[1, 100, 1000, 5000]}
         />
+
+        <Segmented
+          value={method}
+          onChange={setMethod}
+          wide
+          options={[
+            { value: "addEvents", label: "addEvents(db, batch)" },
+            { value: "nostr.add", label: "nostr.add(event)" },
+          ]}
+        />
+
+        <div className="btn-row">
+          {busy ? (
+            <button
+              className="btn danger"
+              onClick={() => (stopRef.current = true)}
+            >
+              ■ stop
+            </button>
+          ) : (
+            <button
+              className="btn primary"
+              disabled={!ready}
+              onClick={generate}
+            >
+              ▶ generate & store
+            </button>
+          )}
+        </div>
+
+        <div className="group-title">event shape</div>
         <NumberField
           label="authors"
           value={gen.authors}
@@ -206,16 +240,19 @@ export function StorePage() {
           presets={[1, 30, 365]}
           suffix="days"
         />
-        <div className="numfield">
-          <span className="numfield-label">kinds</span>
-          <span className="kind-toggles">
+        <Field label="kinds">
+          <span className="toggles">
             {GENERATOR_KINDS.map((k) => {
               const on = gen.kinds.includes(k);
               return (
                 <button
                   key={k}
                   className={on ? "on" : ""}
-                  style={on ? { borderColor: kindColor(k), color: kindColor(k) } : undefined}
+                  style={
+                    on
+                      ? { borderColor: kindColor(k), color: kindColor(k) }
+                      : undefined
+                  }
                   onClick={() =>
                     setG({
                       kinds: on
@@ -229,29 +266,7 @@ export function StorePage() {
               );
             })}
           </span>
-        </div>
-
-        <Segmented
-          value={method}
-          onChange={setMethod}
-          size="sm"
-          options={[
-            { value: "addEvents", label: "addEvents(db, batch)" },
-            { value: "nostr.add", label: "nostr.add(event)" },
-          ]}
-        />
-
-        <div className="btn-row">
-          {busy ? (
-            <button className="btn danger" onClick={() => (stopRef.current = true)}>
-              ■ stop
-            </button>
-          ) : (
-            <button className="btn primary" disabled={!ready} onClick={generate}>
-              ▶ generate & store
-            </button>
-          )}
-        </div>
+        </Field>
 
         <div className="group-title">paste / file</div>
         <textarea
@@ -299,10 +314,16 @@ export function StorePage() {
             <Progress value={run.done} max={run.total} />
             <div className="stats">
               <Stat label="stored" value={fmtNum(run.done)} />
-              <Stat label="events/s" value={fmtNum(Math.round(rate))} tone="accent" />
+              <Stat
+                label="events/s"
+                value={fmtNum(Math.round(rate))}
+                tone="accent"
+              />
               <Stat label="elapsed" value={fmtMs(elapsed)} />
               {bstats && <Stat label="batch p50" value={fmtMs(bstats.p50)} />}
-              {bstats && <Stat label="batch max" value={fmtMs(bstats.max)} tone="warn" />}
+              {bstats && (
+                <Stat label="batch max" value={fmtMs(bstats.max)} tone="warn" />
+              )}
               {run.flushMs !== undefined && (
                 <Stat label="queue flush" value={fmtMs(run.flushMs)} />
               )}

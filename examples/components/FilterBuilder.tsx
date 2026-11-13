@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { Filter } from "../../src/index.ts";
 import { KIND_NAMES, kindColor, parseFilters, shortHex } from "../lib/nostr.ts";
 import { Pubkey } from "./ResultsView.tsx";
-import { ChipInput } from "./ui.tsx";
+import { ChipInput, Segmented } from "./ui.tsx";
 
 export type FilterHints = {
   kinds: [number, number][];
@@ -26,12 +26,57 @@ export function cleanFilter(filter: Filter): Filter {
 }
 
 const RANGES: [string, number][] = [
-  ["1h", 3600],
-  ["24h", 86400],
-  ["7d", 86400 * 7],
-  ["30d", 86400 * 30],
-  ["1y", 86400 * 365],
+  ["1 hour ago", 3600],
+  ["24 hours ago", 86400],
+  ["7 days ago", 86400 * 7],
+  ["30 days ago", 86400 * 30],
+  ["1 year ago", 86400 * 365],
 ];
+
+/** datetime input with a dropdown of relative times */
+function TimeRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value?: number;
+  onChange: (v: number | undefined) => void;
+}) {
+  return (
+    <div className="fb-row">
+      <span className="fb-key">{label}</span>
+      <input
+        type="datetime-local"
+        value={toLocalInput(value)}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              ? Math.floor(new Date(e.target.value).getTime() / 1000)
+              : undefined,
+          )
+        }
+      />
+      <select
+        className="quick"
+        value=""
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "clear") onChange(undefined);
+          else if (v) onChange(Math.floor(Date.now() / 1000) - Number(v));
+        }}
+      >
+        <option value="">quick…</option>
+        {RANGES.map(([l, secs]) => (
+          <option key={l} value={secs}>
+            {l}
+          </option>
+        ))}
+        <option value="clear">clear</option>
+      </select>
+    </div>
+  );
+}
 
 function toLocalInput(ts?: number) {
   if (ts === undefined) return "";
@@ -61,9 +106,7 @@ function SingleFilter({
   );
 
   const kindSuggestions = (
-    hints?.kinds.length
-      ? hints.kinds.slice(0, 10).map(([k]) => k)
-      : COMMON_KINDS
+    hints?.kinds.length ? hints.kinds.slice(0, 6).map(([k]) => k) : COMMON_KINDS
   ).map((k) => ({
     value: String(k),
     label: (
@@ -73,8 +116,6 @@ function SingleFilter({
       </span>
     ),
   }));
-
-  const now = Math.floor(Date.now() / 1000);
 
   return (
     <div className="fb">
@@ -101,7 +142,7 @@ function SingleFilter({
           onChange={(v) => set("authors", v.length ? v : undefined)}
           parse={(s) => (HEX64.test(s.toLowerCase()) ? s.toLowerCase() : null)}
           render={(v) => <Pubkey pubkey={v} />}
-          suggestions={hints?.authors.slice(0, 5).map(([pk]) => ({
+          suggestions={hints?.authors.slice(0, 4).map(([pk]) => ({
             value: pk,
             label: <Pubkey pubkey={pk} n={4} />,
           }))}
@@ -155,7 +196,12 @@ function SingleFilter({
               render={(v) => (HEX64.test(v) ? shortHex(v, 10) : v)}
               placeholder="values"
             />
-            <button type="button" className="tiny" onClick={() => set(key, undefined)}>
+            <button
+              type="button"
+              className="icon"
+              title="remove"
+              onClick={() => set(key, undefined)}
+            >
               ×
             </button>
           </div>
@@ -163,81 +209,30 @@ function SingleFilter({
       })}
       <div className="fb-row">
         <span className="fb-key" />
-        <span className="fb-addtags">
-          {["t", "p", "e", "d"].map((l) => (
-            <button
-              type="button"
-              key={l}
-              disabled={`#${l}` in filter}
-              onClick={() => set(`#${l}`, [])}
-            >
-              +#{l}
-            </button>
+        <select
+          className="fb-addtag"
+          value=""
+          onChange={(e) => e.target.value && set(e.target.value, [])}
+        >
+          <option value="">+ tag filter…</option>
+          {["#t", "#p", "#e", "#d", "#a", "&t", "&p"].map((k) => (
+            <option key={k} value={k} disabled={k in filter}>
+              {k} {k[0] === "&" ? "(all of)" : "(any of)"}
+            </option>
           ))}
-          <button
-            type="button"
-            className="and"
-            disabled={"&t" in filter}
-            onClick={() => set("&t", [])}
-          >
-            +&t
-          </button>
-        </span>
+        </select>
       </div>
 
-      <div className="fb-row">
-        <span className="fb-key">since</span>
-        <input
-          type="datetime-local"
-          value={toLocalInput(filter.since)}
-          onChange={(e) =>
-            set(
-              "since",
-              e.target.value
-                ? Math.floor(new Date(e.target.value).getTime() / 1000)
-                : undefined,
-            )
-          }
-        />
-        <span className="presets">
-          {RANGES.map(([label, secs]) => (
-            <button
-              type="button"
-              key={label}
-              className={filter.since === now - secs ? "on" : ""}
-              onClick={() => set("since", now - secs)}
-            >
-              -{label}
-            </button>
-          ))}
-        </span>
-      </div>
-      <div className="fb-row">
-        <span className="fb-key">until</span>
-        <input
-          type="datetime-local"
-          value={toLocalInput(filter.until)}
-          onChange={(e) =>
-            set(
-              "until",
-              e.target.value
-                ? Math.floor(new Date(e.target.value).getTime() / 1000)
-                : undefined,
-            )
-          }
-        />
-        <span className="presets">
-          {RANGES.slice(0, 3).map(([label, secs]) => (
-            <button
-              type="button"
-              key={label}
-              onClick={() => set("until", now - secs)}
-            >
-              -{label}
-            </button>
-          ))}
-        </span>
-      </div>
+      <TimeRow
+        label="since"
+        value={filter.since}
+        onChange={(v) => set("since", v)}
+      />
+      <TimeRow
+        label="until"
+        value={filter.until}
+        onChange={(v) => set("until", v)}
+      />
 
       <div className="fb-row">
         <span className="fb-key">limit</span>
@@ -245,30 +240,19 @@ function SingleFilter({
           type="number"
           className="limit"
           value={filter.limit ?? ""}
-          placeholder="∞"
+          placeholder="none"
           onChange={(e) =>
             set("limit", e.target.value ? Number(e.target.value) : undefined)
           }
         />
-        <span className="presets">
-          {[1, 10, 100, 1000].map((n) => (
-            <button
-              type="button"
-              key={n}
-              className={filter.limit === n ? "on" : ""}
-              onClick={() => set("limit", n)}
-            >
-              {n}
-            </button>
-          ))}
-          <button
-            type="button"
-            className={filter.limit === undefined ? "on" : ""}
-            onClick={() => set("limit", undefined)}
-          >
-            ∞
-          </button>
-        </span>
+        <Segmented
+          value={filter.limit ?? 0}
+          onChange={(n) => set("limit", n || undefined)}
+          options={[10, 100, 1000, 0].map((n) => ({
+            value: n,
+            label: n ? String(n) : "none",
+          }))}
+        />
       </div>
     </div>
   );

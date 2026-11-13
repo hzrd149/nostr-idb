@@ -85,7 +85,10 @@ export function ActivityLog() {
           </span>
         )}
         {open && (
-          <span className="activity-filters" onClick={(e) => e.stopPropagation()}>
+          <span
+            className="activity-filters"
+            onClick={(e) => e.stopPropagation()}
+          >
             <button
               className={category === null ? "on" : ""}
               onClick={() => setCategory(null)}

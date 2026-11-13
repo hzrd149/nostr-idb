@@ -17,9 +17,9 @@ import {
   reltime,
   shortHex,
 } from "../lib/nostr.ts";
-import { ConfirmButton } from "./ui.tsx";
+import { ConfirmButton, Segmented } from "./ui.tsx";
 
-const ROW_HEIGHT = 28;
+const ROW_HEIGHT = 36;
 
 export function KindBadge({ kind }: { kind: number }) {
   return (
@@ -124,7 +124,10 @@ export function ResultsView({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as Sort)}
+          >
             <option value="newest">newest</option>
             <option value="oldest">oldest</option>
             <option value="kind">kind</option>
@@ -150,7 +153,6 @@ export function ResultsView({
                   style={{ top: (first + i) * ROW_HEIGHT, height: ROW_HEIGHT }}
                   onClick={() => setSelected(selected === e ? null : e)}
                 >
-                  <span className="row-n">{first + i + 1}</span>
                   <KindBadge kind={e.kind} />
                   <Pubkey pubkey={e.pubkey} n={6} />
                   <span className="row-content">
@@ -158,15 +160,15 @@ export function ResultsView({
                       <span className="muted">
                         {e.tags
                           .slice(0, 4)
-                          .map((t) => `${t[0]}:${shortHex(t[1] ?? "", 8)}`)
+                          .map((t) => `${t[0]} ${shortHex(t[1] ?? "", 8)}`)
                           .join(" ")}
                       </span>
                     )}
                   </span>
-                  <span className="row-tags">
-                    {e.tags.length ? e.tags.length + "t" : ""}
-                  </span>
-                  <span className="row-time" title={new Date(e.created_at * 1000).toISOString()}>
+                  <span
+                    className="row-time"
+                    title={new Date(e.created_at * 1000).toISOString()}
+                  >
                     {reltime(e.created_at)}
                   </span>
                 </div>
@@ -234,22 +236,22 @@ function EventDetail({
     <aside className="detail">
       <div className="detail-head">
         <KindBadge kind={event.kind} />
-        <span className="muted">{new Date(event.created_at * 1000).toLocaleString()}</span>
         <span style={{ flex: 1 }} />
+        <Segmented
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "fields", label: "fields" },
+            { value: "json", label: "JSON" },
+          ]}
+        />
         <button
-          className={`tiny ${view === "fields" ? "on" : ""}`}
-          onClick={() => setView(view === "fields" ? "json" : "fields")}
-        >
-          {view === "fields" ? "{ }" : "≡"}
-        </button>
-        <button
-          className="tiny"
+          className="btn"
           onClick={() => navigator.clipboard.writeText(JSON.stringify(event))}
-          title="copy JSON"
         >
-          ⧉
+          copy
         </button>
-        <button className="tiny" onClick={onClose}>
+        <button className="icon" title="close" onClick={onClose}>
           ×
         </button>
       </div>
@@ -260,7 +262,10 @@ function EventDetail({
         <div className="detail-body">
           <dl className="fields">
             <dt>id</dt>
-            <dd className="mono clickable" onClick={() => q({ ids: [event.id] })}>
+            <dd
+              className="mono clickable"
+              onClick={() => q({ ids: [event.id] })}
+            >
               {event.id}
             </dd>
             {uid !== event.id && (
@@ -277,7 +282,10 @@ function EventDetail({
               <Pubkey pubkey={event.pubkey} n={64} />
             </dd>
             <dt>kind</dt>
-            <dd className="clickable" onClick={() => q({ kinds: [event.kind] })}>
+            <dd
+              className="clickable"
+              onClick={() => q({ kinds: [event.kind] })}
+            >
               <KindBadge kind={event.kind} />
             </dd>
             <dt>created</dt>
@@ -287,7 +295,8 @@ function EventDetail({
                 q({ until: event.created_at, since: event.created_at - 3600 })
               }
             >
-              {event.created_at}
+              {new Date(event.created_at * 1000).toLocaleString()}{" "}
+              <span className="muted">{event.created_at}</span>
             </dd>
           </dl>
 
@@ -300,9 +309,7 @@ function EventDetail({
                     <tr
                       key={i}
                       className={indexable ? "clickable" : ""}
-                      onClick={() =>
-                        indexable && q({ [`#${t[0]}`]: [t[1]] })
-                      }
+                      onClick={() => indexable && q({ [`#${t[0]}`]: [t[1]] })}
                     >
                       <td className="tag-name">{t[0]}</td>
                       <td className="mono">{t.slice(1).join(" · ")}</td>
@@ -331,7 +338,9 @@ function EventDetail({
                 </div>
                 <div className="stored-tags">
                   {stored.tags?.map((t) => (
-                    <code key={t}>{t.length > 24 ? t.slice(0, 24) + "…" : t}</code>
+                    <code key={t}>
+                      {t.length > 24 ? t.slice(0, 24) + "…" : t}
+                    </code>
                   ))}
                 </div>
               </>
@@ -353,7 +362,6 @@ function EventDetail({
         >
           kind+author
         </button>
-        <span style={{ flex: 1 }} />
         <ConfirmButton
           onConfirm={async () => {
             await track(
