@@ -260,9 +260,11 @@ Helper functions in `src/__tests__/helpers.ts`:
 | Package               | Role                                               |
 | --------------------- | -------------------------------------------------- |
 | `idb` `^8`            | Typed Promise-based IndexedDB wrapper              |
-| `debug` `^4`          | Namespaced logging (`DEBUG=nostr-idb*`)            |
 | `nostr-tools` `^2.23` | **devDependency only** — used in tests for signing |
 | `vitest` `^4`         | Test runner (browser mode via Playwright)          |
+
+Diagnostics use the built-in console. Enable logging and operation timers with
+`configureDiagnostics({ debug: true, timing: true })`; both default to false.
 
 ---
 

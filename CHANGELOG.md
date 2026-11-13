@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Diagnostics
+
+- Replace the direct `debug` dependency with browser console logging and library-wide `configureDiagnostics({ debug, timing })` flags, both off by default.
+- Add concurrency-safe console timers for database lifecycle, queries and index reads, writes, queue processing, deletion, pruning, and subscription loading.
+- Wait for deletion transactions to finish before reporting completion and ending their timers.
+
 ### Performance Improvements
 
 - Reduce event-body reads for limited author and kind queries while preserving timestamp ties, cached-event precedence, and filter semantics.

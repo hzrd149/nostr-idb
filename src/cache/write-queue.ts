@@ -1,7 +1,7 @@
 import type { StoredEvent } from "../lib/nostr.js";
 import { addEvents, updateUsed, getEventUID } from "../database/index.js";
 import { NostrIDBDatabase } from "../database/schema.js";
-import { logger } from "../debug.js";
+import { logger, startTimer } from "../debug.js";
 import type { Filter } from "../lib/nostr.js";
 import { matchFilters } from "../lib/nostr.js";
 
@@ -62,40 +62,58 @@ export class WriteQueue<TEvent extends StoredEvent = StoredEvent> {
 
   /** Write all events in the queue to the database */
   async flush(count = 1000) {
-    if (this.eventQueueHead < this.eventQueue.length) {
-      let events: TEvent[] = [];
-      for (
-        let i = 0;
-        i < count && this.eventQueueHead < this.eventQueue.length;
-        i++
-      ) {
-        const event = this.eventQueue[this.eventQueueHead++];
-        events.push(event);
-        this.queuedIds.delete(getEventUID(event));
-      }
-      // Each compaction copies at most as many entries as were consumed.
-      // Reset before awaiting the hook so newly queued events stay pending.
-      if (this.eventQueueHead === this.eventQueue.length) {
-        this.eventQueue = [];
-        this.eventQueueHead = 0;
-      } else if (this.eventQueueHead >= this.eventQueue.length / 2) {
-        this.eventQueue = this.eventQueue.slice(this.eventQueueHead);
-        this.eventQueueHead = 0;
+    if (
+      this.eventQueueHead >= this.eventQueue.length &&
+      this.lastUsedQueue.size === 0
+    )
+      return;
+    const end = startTimer("WriteQueue.flush", this.db.name);
+    try {
+      if (this.eventQueueHead < this.eventQueue.length) {
+        let events: TEvent[] = [];
+        for (
+          let i = 0;
+          i < count && this.eventQueueHead < this.eventQueue.length;
+          i++
+        ) {
+          const event = this.eventQueue[this.eventQueueHead++];
+          events.push(event);
+          this.queuedIds.delete(getEventUID(event));
+        }
+        // Each compaction copies at most as many entries as were consumed.
+        // Reset before awaiting the hook so newly queued events stay pending.
+        if (this.eventQueueHead === this.eventQueue.length) {
+          this.eventQueue = [];
+          this.eventQueueHead = 0;
+        } else if (this.eventQueueHead >= this.eventQueue.length / 2) {
+          this.eventQueue = this.eventQueue.slice(this.eventQueueHead);
+          this.eventQueueHead = 0;
+        }
+
+        if (this.processEvents) {
+          const endProcessing = startTimer(
+            "WriteQueue.processEvents",
+            this.db.name,
+          );
+          try {
+            events = (await this.processEvents(events)) || events;
+          } finally {
+            endProcessing();
+          }
+        }
+
+        await addEvents(this.db, events);
+        log(`Wrote ${events.length} to database`);
+        const remaining = this.eventQueue.length - this.eventQueueHead;
+        if (remaining > 0) log(`${remaining} left`);
       }
 
-      if (this.processEvents) {
-        events = (await this.processEvents(events)) || events;
+      if (this.lastUsedQueue.size > 0) {
+        await updateUsed(this.db, this.lastUsedQueue);
+        this.lastUsedQueue.clear();
       }
-
-      await addEvents(this.db, events);
-      log(`Wrote ${events.length} to database`);
-      const remaining = this.eventQueue.length - this.eventQueueHead;
-      if (remaining > 0) log(`${remaining} left`);
-    }
-
-    if (this.lastUsedQueue.size > 0) {
-      await updateUsed(this.db, this.lastUsedQueue);
-      this.lastUsedQueue.clear();
+    } finally {
+      end();
     }
   }
 

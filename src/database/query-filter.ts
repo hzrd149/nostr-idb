@@ -5,142 +5,158 @@ import { matchFilter } from "../lib/nostr.js";
 import { getEventUID, INDEXABLE_TAGS } from "./common.js";
 import type { NostrIDBDatabase } from "./schema.js";
 import type { Filter } from "../lib/nostr.js";
+import { startTimer } from "../debug.js";
 
 /** Return all events for the given pubkeys */
-export function queryForPubkeys(
+export async function queryForPubkeys(
   db: NostrIDBDatabase,
   authors: Filter["authors"] = [],
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
-  const loaded: string[] = [];
-  const ids = new Set<string>();
+  const end = startTimer("queryForPubkeys", db.name);
+  try {
+    const loaded: string[] = [];
+    const ids = new Set<string>();
 
-  if (indexCache) {
-    for (const pubkey of authors) {
-      const cached = indexCache.getPubkeyIndex(pubkey);
-      if (cached) {
-        for (const id of cached) ids.add(id);
-        loaded.push(pubkey);
+    if (indexCache) {
+      for (const pubkey of authors) {
+        const cached = indexCache.getPubkeyIndex(pubkey);
+        if (cached) {
+          for (const id of cached) ids.add(id);
+          loaded.push(pubkey);
+        }
       }
     }
+
+    // all indexes where loaded from indexCache
+    if (loaded.length === authors.length) return Promise.resolve(ids);
+
+    // load remaining indexes from db
+    const trans = db.transaction("events", "readonly");
+    const objectStore = trans.objectStore("events");
+    const index = objectStore.index("pubkey");
+
+    const handleResults = (pubkey: string, result: string[]) => {
+      for (const id of result) ids.add(id);
+      // add index to cache
+      if (indexCache) indexCache.setPubkeyIndex(pubkey, new Set(result));
+    };
+
+    const promises = authors
+      .filter((p) => !loaded.includes(p))
+      .map((pubkey) =>
+        index.getAllKeys(pubkey).then((r) => handleResults(pubkey, r)),
+      );
+
+    trans.commit();
+    return await Promise.all(promises).then(() => ids);
+  } finally {
+    end();
   }
-
-  // all indexes where loaded from indexCache
-  if (loaded.length === authors.length) return Promise.resolve(ids);
-
-  // load remaining indexes from db
-  const trans = db.transaction("events", "readonly");
-  const objectStore = trans.objectStore("events");
-  const index = objectStore.index("pubkey");
-
-  const handleResults = (pubkey: string, result: string[]) => {
-    for (const id of result) ids.add(id);
-    // add index to cache
-    if (indexCache) indexCache.setPubkeyIndex(pubkey, new Set(result));
-  };
-
-  const promises = authors
-    .filter((p) => !loaded.includes(p))
-    .map((pubkey) =>
-      index.getAllKeys(pubkey).then((r) => handleResults(pubkey, r)),
-    );
-
-  trans.commit();
-  return Promise.all(promises).then(() => ids);
 }
 
 /** Return all events for the given indexable tag (OR logic) */
-export function queryForTag(
+export async function queryForTag(
   db: NostrIDBDatabase,
   tag: string,
   values: string[],
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
-  const loaded: string[] = [];
-  const ids = new Set<string>();
+  const end = startTimer("queryForTag", db.name);
+  try {
+    const loaded: string[] = [];
+    const ids = new Set<string>();
 
-  if (indexCache) {
-    for (const value of values) {
-      const cached = indexCache.getTagIndex(tag + value);
-      if (cached) {
-        for (const id of cached) ids.add(id);
-        loaded.push(value);
+    if (indexCache) {
+      for (const value of values) {
+        const cached = indexCache.getTagIndex(tag + value);
+        if (cached) {
+          for (const id of cached) ids.add(id);
+          loaded.push(value);
+        }
       }
     }
+
+    // all indexes where loaded from indexCache
+    if (loaded.length === values.length) return Promise.resolve(ids);
+
+    // load remaining indexes from db
+    const trans = db.transaction("events", "readonly");
+    const objectStore = trans.objectStore("events");
+    const index = objectStore.index("tags");
+
+    const handleResults = (value: string, result: string[]) => {
+      for (const id of result) ids.add(id);
+      // add index to cache
+      if (indexCache) indexCache.setTagIndex(tag + value, new Set(result));
+    };
+
+    const promises = values.map((v) =>
+      index.getAllKeys(tag + v).then((r) => handleResults(v, r)),
+    );
+
+    trans.commit();
+    return await Promise.all(promises).then(() => ids);
+  } finally {
+    end();
   }
-
-  // all indexes where loaded from indexCache
-  if (loaded.length === values.length) return Promise.resolve(ids);
-
-  // load remaining indexes from db
-  const trans = db.transaction("events", "readonly");
-  const objectStore = trans.objectStore("events");
-  const index = objectStore.index("tags");
-
-  const handleResults = (value: string, result: string[]) => {
-    for (const id of result) ids.add(id);
-    // add index to cache
-    if (indexCache) indexCache.setTagIndex(tag + value, new Set(result));
-  };
-
-  const promises = values.map((v) =>
-    index.getAllKeys(tag + v).then((r) => handleResults(v, r)),
-  );
-
-  trans.commit();
-  return Promise.all(promises).then(() => ids);
 }
 
 /** Return all events for the given indexable tag (AND logic - events must have ALL values) */
-export function queryForTagAnd(
+export async function queryForTagAnd(
   db: NostrIDBDatabase,
   tag: string,
   values: string[],
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
-  if (values.length === 0) return Promise.resolve(new Set());
-  if (values.length === 1) {
-    // Single value AND is same as OR
-    return queryForTag(db, tag, values, indexCache);
-  }
+  const end = startTimer("queryForTagAnd", db.name);
+  try {
+    if (values.length === 0) return Promise.resolve(new Set());
+    if (values.length === 1) {
+      // Single value AND is same as OR
+      return await queryForTag(db, tag, values, indexCache);
+    }
 
-  const loaded: string[] = [];
-  const valueSets: Set<string>[] = [];
+    const loaded: string[] = [];
+    const valueSets: Set<string>[] = [];
 
-  // Load from indexCache
-  if (indexCache) {
-    for (const value of values) {
-      const cached = indexCache.getTagIndex(tag + value);
-      if (cached) {
-        valueSets.push(cached);
-        loaded.push(value);
+    // Load from indexCache
+    if (indexCache) {
+      for (const value of values) {
+        const cached = indexCache.getTagIndex(tag + value);
+        if (cached) {
+          valueSets.push(cached);
+          loaded.push(value);
+        }
       }
     }
+
+    // All indexes were loaded from indexCache — no DB round-trip needed
+    if (loaded.length === values.length) {
+      return Promise.resolve(intersectSets(valueSets));
+    }
+
+    // Load remaining indexes from db
+    const trans = db.transaction("events", "readonly");
+    const objectStore = trans.objectStore("events");
+    const index = objectStore.index("tags");
+
+    const handleResults = (value: string, result: string[]) => {
+      const s = new Set(result);
+      valueSets.push(s);
+      // add index to cache
+      if (indexCache) indexCache.setTagIndex(tag + value, s);
+    };
+
+    const promises = values
+      .filter((v) => !loaded.includes(v))
+      .map((v) => index.getAllKeys(tag + v).then((r) => handleResults(v, r)));
+
+    trans.commit();
+    return await Promise.all(promises).then(() => intersectSets(valueSets));
+  } finally {
+    end();
   }
-
-  // All indexes were loaded from indexCache — no DB round-trip needed
-  if (loaded.length === values.length) {
-    return Promise.resolve(intersectSets(valueSets));
-  }
-
-  // Load remaining indexes from db
-  const trans = db.transaction("events", "readonly");
-  const objectStore = trans.objectStore("events");
-  const index = objectStore.index("tags");
-
-  const handleResults = (value: string, result: string[]) => {
-    const s = new Set(result);
-    valueSets.push(s);
-    // add index to cache
-    if (indexCache) indexCache.setTagIndex(tag + value, s);
-  };
-
-  const promises = values
-    .filter((v) => !loaded.includes(v))
-    .map((v) => index.getAllKeys(tag + v).then((r) => handleResults(v, r)));
-
-  trans.commit();
-  return Promise.all(promises).then(() => intersectSets(valueSets));
 }
 
 /** Intersect an array of Sets, iterating from smallest to largest for efficiency */
@@ -165,44 +181,51 @@ function intersectSets(sets: Set<string>[]): Set<string> {
 }
 
 /** Return all events for the given kinds */
-export function queryForKinds(
+export async function queryForKinds(
   db: NostrIDBDatabase,
   kinds: Filter["kinds"] = [],
   indexCache?: IndexCache,
 ): Promise<Set<string>> {
-  const loaded: number[] = [];
-  const ids = new Set<string>();
+  const end = startTimer("queryForKinds", db.name);
+  try {
+    const loaded: number[] = [];
+    const ids = new Set<string>();
 
-  // load from indexCache
-  if (indexCache) {
-    for (const kind of kinds) {
-      const cached = indexCache.getKindIndex(kind);
-      if (cached) {
-        for (const id of cached) ids.add(id);
-        loaded.push(kind);
+    // load from indexCache
+    if (indexCache) {
+      for (const kind of kinds) {
+        const cached = indexCache.getKindIndex(kind);
+        if (cached) {
+          for (const id of cached) ids.add(id);
+          loaded.push(kind);
+        }
       }
     }
+
+    // all indexes where loaded from indexCache
+    if (loaded.length === kinds.length) return Promise.resolve(ids);
+
+    // load remaining indexes from db
+    const trans = db.transaction("events", "readonly");
+    const index = trans.objectStore("events").index("kind");
+
+    const handleResults = (kind: number, result: string[]) => {
+      for (const id of result) ids.add(id);
+      // add index to cache
+      if (indexCache) indexCache.setKindIndex(kind, new Set(result));
+    };
+
+    const promises = kinds
+      .filter((k) => !loaded.includes(k))
+      .map((kind) =>
+        index.getAllKeys(kind).then((r) => handleResults(kind, r)),
+      );
+
+    trans.commit();
+    return await Promise.all(promises).then(() => ids);
+  } finally {
+    end();
   }
-
-  // all indexes where loaded from indexCache
-  if (loaded.length === kinds.length) return Promise.resolve(ids);
-
-  // load remaining indexes from db
-  const trans = db.transaction("events", "readonly");
-  const index = trans.objectStore("events").index("kind");
-
-  const handleResults = (kind: number, result: string[]) => {
-    for (const id of result) ids.add(id);
-    // add index to cache
-    if (indexCache) indexCache.setKindIndex(kind, new Set(result));
-  };
-
-  const promises = kinds
-    .filter((k) => !loaded.includes(k))
-    .map((kind) => index.getAllKeys(kind).then((r) => handleResults(kind, r)));
-
-  trans.commit();
-  return Promise.all(promises).then(() => ids);
 }
 
 /** Return all events for the given time range */
@@ -211,17 +234,22 @@ export async function queryForTime(
   since: number | undefined,
   until: number | undefined,
 ): Promise<string[]> {
-  let range: IDBKeyRange;
-  if (since !== undefined && until !== undefined)
-    range = IDBKeyRange.bound(since, until);
-  else if (since !== undefined) range = IDBKeyRange.lowerBound(since);
-  else if (until !== undefined) range = IDBKeyRange.upperBound(until);
-  else throw new Error("Missing since or until");
+  const end = startTimer("queryForTime", db.name);
+  try {
+    let range: IDBKeyRange;
+    if (since !== undefined && until !== undefined)
+      range = IDBKeyRange.bound(since, until);
+    else if (since !== undefined) range = IDBKeyRange.lowerBound(since);
+    else if (until !== undefined) range = IDBKeyRange.upperBound(until);
+    else throw new Error("Missing since or until");
 
-  const ids = (
-    await db.getAllKeysFromIndex("events", "created_at", range)
-  ).reverse();
-  return ids;
+    const ids = (
+      await db.getAllKeysFromIndex("events", "created_at", range)
+    ).reverse();
+    return ids;
+  } finally {
+    end();
+  }
 }
 
 /** Return all events for the given filter */
@@ -335,86 +363,91 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
   filters: Filter[],
   eventMap?: Map<string, TEvent>,
 ): Promise<TEvent[]> {
-  const eventBuffer: TEvent[] = [];
+  const end = startTimer("loadEventsByUID", db.name);
+  try {
+    const eventBuffer: TEvent[] = [];
 
-  // load from in-memory event map
-  let remainingIds: string[] = [];
-  if (eventMap) {
-    for (const uid of uids) {
-      const event = eventMap.get(uid);
-      if (event) eventBuffer.push(event);
-      else remainingIds.push(uid);
-    }
-  } else remainingIds = uids;
-
-  if (remainingIds.length === 0)
-    return selectEventsForFilters(eventBuffer, filters);
-
-  const trans = db.transaction("events", "readonly");
-  const objectStore = trans.objectStore("events");
-
-  const filter = filters[0];
-  const limit = filter.limit;
-  // Only optimize simple index-backed filters. Time-filter candidate truncation
-  // and multi-filter limits retain their existing paths.
-  if (
-    filters.length === 1 &&
-    limit !== undefined &&
-    Number.isSafeInteger(limit) &&
-    limit > 0 &&
-    remainingIds.length >= 128 &&
-    remainingIds.length > limit * 2 &&
-    Object.keys(filter).every((key) =>
-      ["authors", "kinds", "limit"].includes(key),
-    )
-  ) {
-    const wanted = new Set(remainingIds);
-    const loaded = new Map<string, TEvent>();
-    let cursor = await objectStore
-      .index("created_at")
-      .openKeyCursor(null, "prev");
-    let cutoff: number | undefined;
-    let matched = 0;
-    let scanned = 0;
-    const scanBudget = Math.max(512, limit * 8);
-    while (cursor) {
-      if (cutoff !== undefined && cursor.key < cutoff) break;
-      // Avoid scanning the entire time index for sparse candidate selections.
-      if (cutoff === undefined && scanned >= scanBudget) break;
-      scanned++;
-      const uid = cursor.primaryKey;
-      if (wanted.has(uid)) {
-        const row = await objectStore.get(uid);
-        if (row && matchFilter(filter, row.event)) {
-          loaded.set(uid, row.event as TEvent);
-          if (++matched === limit) cutoff = cursor.key;
-        }
-      }
-      cursor = await cursor.continue();
-    }
-    if (!cursor || cutoff !== undefined) {
-      trans.commit();
-      // Read the whole cutoff timestamp bucket, then restore candidate order:
-      // date sorting is stable, and cached events must still precede disk rows.
-      // The newest `limit` missing matches suffice even if cached bodies have
-      // different timestamps or no longer match the filter.
-      for (const uid of remainingIds) {
-        const event = loaded.get(uid);
+    // load from in-memory event map
+    let remainingIds: string[] = [];
+    if (eventMap) {
+      for (const uid of uids) {
+        const event = eventMap.get(uid);
         if (event) eventBuffer.push(event);
+        else remainingIds.push(uid);
       }
+    } else remainingIds = uids;
+
+    if (remainingIds.length === 0)
       return selectEventsForFilters(eventBuffer, filters);
+
+    const trans = db.transaction("events", "readonly");
+    const objectStore = trans.objectStore("events");
+
+    const filter = filters[0];
+    const limit = filter.limit;
+    // Only optimize simple index-backed filters. Time-filter candidate truncation
+    // and multi-filter limits retain their existing paths.
+    if (
+      filters.length === 1 &&
+      limit !== undefined &&
+      Number.isSafeInteger(limit) &&
+      limit > 0 &&
+      remainingIds.length >= 128 &&
+      remainingIds.length > limit * 2 &&
+      Object.keys(filter).every((key) =>
+        ["authors", "kinds", "limit"].includes(key),
+      )
+    ) {
+      const wanted = new Set(remainingIds);
+      const loaded = new Map<string, TEvent>();
+      let cursor = await objectStore
+        .index("created_at")
+        .openKeyCursor(null, "prev");
+      let cutoff: number | undefined;
+      let matched = 0;
+      let scanned = 0;
+      const scanBudget = Math.max(512, limit * 8);
+      while (cursor) {
+        if (cutoff !== undefined && cursor.key < cutoff) break;
+        // Avoid scanning the entire time index for sparse candidate selections.
+        if (cutoff === undefined && scanned >= scanBudget) break;
+        scanned++;
+        const uid = cursor.primaryKey;
+        if (wanted.has(uid)) {
+          const row = await objectStore.get(uid);
+          if (row && matchFilter(filter, row.event)) {
+            loaded.set(uid, row.event as TEvent);
+            if (++matched === limit) cutoff = cursor.key;
+          }
+        }
+        cursor = await cursor.continue();
+      }
+      if (!cursor || cutoff !== undefined) {
+        trans.commit();
+        // Read the whole cutoff timestamp bucket, then restore candidate order:
+        // date sorting is stable, and cached events must still precede disk rows.
+        // The newest `limit` missing matches suffice even if cached bodies have
+        // different timestamps or no longer match the filter.
+        for (const uid of remainingIds) {
+          const event = loaded.get(uid);
+          if (event) eventBuffer.push(event);
+        }
+        return selectEventsForFilters(eventBuffer, filters);
+      }
     }
+
+    const handleEntry = (e?: { event: StoredEvent }) =>
+      e && eventBuffer.push(e.event as TEvent);
+    const promises = Array.from(remainingIds).map((uid) =>
+      objectStore.get(uid).then(handleEntry),
+    );
+    trans.commit();
+
+    await Promise.all(promises);
+    return selectEventsForFilters(eventBuffer, filters);
+  } finally {
+    end();
   }
-
-  const handleEntry = (e?: { event: StoredEvent }) =>
-    e && eventBuffer.push(e.event as TEvent);
-  const promises = Array.from(remainingIds).map((uid) =>
-    objectStore.get(uid).then(handleEntry),
-  );
-  trans.commit();
-
-  await Promise.all(promises);
-  return selectEventsForFilters(eventBuffer, filters);
 }
 
 /** Return all events for the given filter */
@@ -426,8 +459,13 @@ export async function getEventsForFilter<
   indexCache?: IndexCache,
   eventMap?: Map<string, TEvent>,
 ): Promise<TEvent[]> {
-  const ids = await getIdsForFilter(db, filter, indexCache);
-  return await loadEventsByUID(db, Array.from(ids), [filter], eventMap);
+  const end = startTimer("getEventsForFilter", db.name);
+  try {
+    const ids = await getIdsForFilter(db, filter, indexCache);
+    return await loadEventsByUID(db, Array.from(ids), [filter], eventMap);
+  } finally {
+    end();
+  }
 }
 
 /** Return all events for the given filters */
@@ -439,8 +477,13 @@ export async function getEventsForFilters<
   indexCache?: IndexCache,
   eventMap?: Map<string, TEvent>,
 ): Promise<TEvent[]> {
-  const ids = await getIdsForFilters(db, filters, indexCache);
-  return await loadEventsByUID(db, Array.from(ids), filters, eventMap);
+  const end = startTimer("getEventsForFilters", db.name);
+  try {
+    const ids = await getIdsForFilters(db, filters, indexCache);
+    return await loadEventsByUID(db, Array.from(ids), filters, eventMap);
+  } finally {
+    end();
+  }
 }
 
 /** Return the number of events for the given filter */
@@ -449,8 +492,13 @@ export async function countEventsForFilter(
   filter: Filter,
   indexCache?: IndexCache,
 ): Promise<number> {
-  const ids = await getIdsForFilter(db, filter, indexCache);
-  return ids.size;
+  const end = startTimer("countEventsForFilter", db.name);
+  try {
+    const ids = await getIdsForFilter(db, filter, indexCache);
+    return ids.size;
+  } finally {
+    end();
+  }
 }
 
 /** Return the number of events for the given filters */
@@ -459,6 +507,11 @@ export async function countEventsForFilters(
   filters: Filter[],
   indexCache?: IndexCache,
 ): Promise<number> {
-  const ids = await getIdsForFilters(db, filters, indexCache);
-  return ids.size;
+  const end = startTimer("countEventsForFilters", db.name);
+  try {
+    const ids = await getIdsForFilters(db, filters, indexCache);
+    return ids.size;
+  } finally {
+    end();
+  }
 }

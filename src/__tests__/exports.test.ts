@@ -14,6 +14,7 @@ describe("exports", () => {
         "WriteQueue",
         "addEvents",
         "clearDB",
+        "configureDiagnostics",
         "countEvents",
         "countEventsByKind",
         "countEventsByPubkeys",

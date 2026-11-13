@@ -18,7 +18,7 @@ import {
   getEventsForFilters,
 } from "../database/query-filter.js";
 import type { NostrIDBDatabase } from "../database/schema.js";
-import { logger } from "../debug.js";
+import { logger, startTimer } from "../debug.js";
 import { nanoid } from "../lib/nanoid.js";
 import { selectEventsForFilters } from "../utils.js";
 import { type INostrIDB } from "./interface.js";
@@ -80,9 +80,9 @@ const defaultOptions: Required<NostrDBOptions> = {
 const log = logger.extend("nostridb");
 
 /** Main class that implements the nostrdb logic */
-export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
-  implements INostrIDB<TEvent>
-{
+export class NostrIDB<
+  TEvent extends StoredEvent = StoredEvent,
+> implements INostrIDB<TEvent> {
   options: Required<NostrDBOptions>;
   running = false;
   private writeInterval?: ReturnType<typeof setTimeout>;
@@ -221,8 +221,13 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
   /** Get a single event by its ID */
   async event(id: string): Promise<TEvent | undefined> {
     const db = await this.getDb();
-    const result = await db.get("events", id);
-    return result?.event as TEvent | undefined;
+    const end = startTimer("NostrIDB.event", db.name);
+    try {
+      const result = await db.get("events", id);
+      return result?.event as TEvent | undefined;
+    } finally {
+      end();
+    }
   }
 
   /** Get the latest replaceable event for a given kind, author, and optional identifier */
@@ -244,35 +249,40 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
 
   /** Get events matching the given filters */
   async query(filters: Filter | Filter[]): Promise<TEvent[]> {
-    const f = Array.isArray(filters) ? filters : [filters];
-    const db = await this.getDb();
-    const queue = await this.getWriteQueue();
+    const end = startTimer("NostrIDB.query", this.db?.name);
+    try {
+      const f = Array.isArray(filters) ? filters : [filters];
+      const db = await this.getDb();
+      const queue = await this.getWriteQueue();
 
-    // Get events from queue that match filters
-    const eventsFromQueue = queue.matchPending(f);
+      // Get events from queue that match filters
+      const eventsFromQueue = queue.matchPending(f);
 
-    // Get events from database
-    const filterEvents = await getEventsForFilters(
-      db,
-      eventsFromQueue.length ? f.map(({ limit, ...filter }) => filter) : f,
-      this.indexCache,
-      this.eventMap,
-    );
+      // Get events from database
+      const filterEvents = await getEventsForFilters(
+        db,
+        eventsFromQueue.length ? f.map(({ limit, ...filter }) => filter) : f,
+        this.indexCache,
+        this.eventMap,
+      );
 
-    // Add events to event map
-    this.addToEventMaps(filterEvents);
+      // Add events to event map
+      this.addToEventMaps(filterEvents);
 
-    // Combine and deduplicate events
-    const idsFromQueue = new Set(eventsFromQueue.map((e) => getEventUID(e)));
-    const events =
-      eventsFromQueue.length > 0
-        ? [
-            ...filterEvents.filter((e) => !idsFromQueue.has(getEventUID(e))),
-            ...eventsFromQueue,
-          ]
-        : filterEvents;
+      // Combine and deduplicate events
+      const idsFromQueue = new Set(eventsFromQueue.map((e) => getEventUID(e)));
+      const events =
+        eventsFromQueue.length > 0
+          ? [
+              ...filterEvents.filter((e) => !idsFromQueue.has(getEventUID(e))),
+              ...eventsFromQueue,
+            ]
+          : filterEvents;
 
-    return selectEventsForFilters(events, f);
+      return selectEventsForFilters(events, f);
+    } finally {
+      end();
+    }
   }
 
   /** Subscribe to events in the database based on filters */
@@ -436,7 +446,6 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
 
   /** Execute a subscription */
   protected async executeSubscription(sub: InternalSubscriptionFor<TEvent>) {
-    const start = new Date().valueOf();
     log(`Running ${sub.id}`, sub.filters);
 
     // load any events from the write queue
@@ -451,6 +460,7 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
       }, this.baseEoseTimeout);
 
       // get events
+      const endLoad = startTimer("subscription.load", db.name);
       getEventsForFilters(
         db,
         eventsFromQueue.length
@@ -458,42 +468,41 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
           : sub.filters,
         this.indexCache,
         this.eventMap,
-      ).then((filterEvents) => {
-        clearTimeout(timeout);
-        this.addToEventMaps(filterEvents);
+      )
+        .finally(endLoad)
+        .then((filterEvents) => {
+          clearTimeout(timeout);
+          this.addToEventMaps(filterEvents);
 
-        if (sub.event && !sub.closed) {
-          const idsFromQueue = new Set(
-            eventsFromQueue.map((e) => getEventUID(e)),
-          );
+          if (sub.event && !sub.closed) {
+            const idsFromQueue = new Set(
+              eventsFromQueue.map((e) => getEventUID(e)),
+            );
 
-          const events =
-            eventsFromQueue.length > 0
-              ? [
-                  ...filterEvents.filter(
-                    (e) => !idsFromQueue.has(getEventUID(e)),
-                  ),
-                  ...eventsFromQueue,
-                ]
-              : filterEvents;
+            const events =
+              eventsFromQueue.length > 0
+                ? [
+                    ...filterEvents.filter(
+                      (e) => !idsFromQueue.has(getEventUID(e)),
+                    ),
+                    ...eventsFromQueue,
+                  ]
+                : filterEvents;
 
-          for (const event of selectEventsForFilters(events, sub.filters)) {
-            try {
-              sub.event(event);
-            } catch (error) {
-              log(`event handler failed with error`, error);
+            for (const event of selectEventsForFilters(events, sub.filters)) {
+              try {
+                sub.event(event);
+              } catch (error) {
+                log(`event handler failed with error`, error);
+              }
             }
+
+            log(`Finished ${sub.id} and got ${events.length} events`);
           }
 
-          const delta = new Date().valueOf() - start;
-          log(
-            `Finished ${sub.id} took ${delta}ms and got ${events.length} events`,
-          );
-        }
-
-        if (sub.eose && !sub.closed) sub.eose();
-        res();
-      });
+          if (sub.eose && !sub.closed) sub.eose();
+          res();
+        });
     });
   }
 

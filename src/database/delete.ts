@@ -4,6 +4,7 @@ import type { Filter } from "../lib/nostr.js";
 import { IndexCache } from "../cache/index-cache.js";
 import { getIdsForFilter, getIdsForFilters } from "./query-filter.js";
 import type { NostrIDBDatabase } from "./schema.js";
+import { startTimer } from "../debug.js";
 
 /**
  * Delete a single event by its ID or UID
@@ -17,27 +18,34 @@ export async function deleteEvent(
   eventId: string,
   indexCache?: IndexCache,
 ): Promise<boolean> {
-  const transaction = db.transaction("events", "readwrite");
-  const objectStore = transaction.objectStore("events");
+  const end = startTimer("deleteEvent", db.name);
+  try {
+    const transaction = db.transaction("events", "readwrite");
+    const objectStore = transaction.objectStore("events");
 
-  // First check if the event exists
-  const existingEvent = await objectStore.get(eventId);
-  if (!existingEvent) {
+    // First check if the event exists
+    const existingEvent = await objectStore.get(eventId);
+    if (!existingEvent) {
+      await transaction.commit();
+      await transaction.done;
+      return false;
+    }
+
+    // Delete the event
+    await objectStore.delete(eventId);
     await transaction.commit();
-    return false;
+    await transaction.done;
+
+    // Update index cache if provided
+    if (indexCache) {
+      const event = existingEvent.event;
+      indexCache.removeEvent(event);
+    }
+
+    return true;
+  } finally {
+    end();
   }
-
-  // Delete the event
-  await objectStore.delete(eventId);
-  await transaction.commit();
-
-  // Update index cache if provided
-  if (indexCache) {
-    const event = existingEvent.event;
-    indexCache.removeEvent(event);
-  }
-
-  return true;
 }
 
 /**
@@ -78,46 +86,52 @@ export async function deleteAllReplaceable(
   kind: number,
   indexCache?: IndexCache,
 ): Promise<number> {
-  if (!isReplaceableKind(kind) && !isAddressableKind(kind)) {
-    throw new Error(`Kind ${kind} is not replaceable`);
-  }
-
-  const transaction = db.transaction("events", "readwrite");
-  const objectStore = transaction.objectStore("events");
-
-  // Get all events for this pubkey and kind
-  const pubkeyIndex = objectStore.index("pubkey");
-  const kindIndex = objectStore.index("kind");
-
-  const pubkeyEvents = await pubkeyIndex.getAllKeys(pubkey);
-  const kindEvents = await kindIndex.getAllKeys(kind);
-
-  // Find intersection of pubkey and kind events
-  const matchingEvents = pubkeyEvents.filter((id) => kindEvents.includes(id));
-
-  let deletedCount = 0;
-  const eventsToDelete: { event: StoredEvent; uid: string }[] = [];
-
-  // Collect events to delete and their data for cache update
-  for (const uid of matchingEvents) {
-    const eventData = await objectStore.get(uid);
-    if (eventData) {
-      eventsToDelete.push({ event: eventData.event, uid });
-      await objectStore.delete(uid);
-      deletedCount++;
+  const end = startTimer("deleteAllReplaceable", db.name);
+  try {
+    if (!isReplaceableKind(kind) && !isAddressableKind(kind)) {
+      throw new Error(`Kind ${kind} is not replaceable`);
     }
-  }
 
-  await transaction.commit();
+    const transaction = db.transaction("events", "readwrite");
+    const objectStore = transaction.objectStore("events");
 
-  // Update index cache if provided
-  if (indexCache && eventsToDelete.length > 0) {
-    for (const { event } of eventsToDelete) {
-      indexCache.removeEvent(event);
+    // Get all events for this pubkey and kind
+    const pubkeyIndex = objectStore.index("pubkey");
+    const kindIndex = objectStore.index("kind");
+
+    const pubkeyEvents = await pubkeyIndex.getAllKeys(pubkey);
+    const kindEvents = await kindIndex.getAllKeys(kind);
+
+    // Find intersection of pubkey and kind events
+    const matchingEvents = pubkeyEvents.filter((id) => kindEvents.includes(id));
+
+    let deletedCount = 0;
+    const eventsToDelete: { event: StoredEvent; uid: string }[] = [];
+
+    // Collect events to delete and their data for cache update
+    for (const uid of matchingEvents) {
+      const eventData = await objectStore.get(uid);
+      if (eventData) {
+        eventsToDelete.push({ event: eventData.event, uid });
+        await objectStore.delete(uid);
+        deletedCount++;
+      }
     }
-  }
 
-  return deletedCount;
+    await transaction.commit();
+    await transaction.done;
+
+    // Update index cache if provided
+    if (indexCache && eventsToDelete.length > 0) {
+      for (const { event } of eventsToDelete) {
+        indexCache.removeEvent(event);
+      }
+    }
+
+    return deletedCount;
+  } finally {
+    end();
+  }
 }
 
 /**
@@ -164,34 +178,40 @@ export async function deleteEventsByIds(
   eventIds: string[],
   indexCache?: IndexCache,
 ): Promise<number> {
-  if (eventIds.length === 0) return 0;
+  const end = startTimer("deleteEventsByIds", db.name);
+  try {
+    if (eventIds.length === 0) return 0;
 
-  const transaction = db.transaction("events", "readwrite");
-  const objectStore = transaction.objectStore("events");
+    const transaction = db.transaction("events", "readwrite");
+    const objectStore = transaction.objectStore("events");
 
-  let deletedCount = 0;
-  const eventsToDelete: StoredEvent[] = [];
+    let deletedCount = 0;
+    const eventsToDelete: StoredEvent[] = [];
 
-  // Collect events to delete and their data for cache update
-  for (const eventId of eventIds) {
-    const eventData = await objectStore.get(eventId);
-    if (eventData) {
-      eventsToDelete.push(eventData.event);
-      await objectStore.delete(eventId);
-      deletedCount++;
+    // Collect events to delete and their data for cache update
+    for (const eventId of eventIds) {
+      const eventData = await objectStore.get(eventId);
+      if (eventData) {
+        eventsToDelete.push(eventData.event);
+        await objectStore.delete(eventId);
+        deletedCount++;
+      }
     }
-  }
 
-  await transaction.commit();
+    await transaction.commit();
+    await transaction.done;
 
-  // Update index cache if provided
-  if (indexCache && eventsToDelete.length > 0) {
-    for (const event of eventsToDelete) {
-      indexCache.removeEvent(event);
+    // Update index cache if provided
+    if (indexCache && eventsToDelete.length > 0) {
+      for (const event of eventsToDelete) {
+        indexCache.removeEvent(event);
+      }
     }
-  }
 
-  return deletedCount;
+    return deletedCount;
+  } finally {
+    end();
+  }
 }
 
 /**
@@ -204,12 +224,18 @@ export async function deleteAllEvents(
   db: NostrIDBDatabase,
   indexCache?: IndexCache,
 ): Promise<void> {
-  const transaction = db.transaction("events", "readwrite");
-  await transaction.objectStore("events").clear();
-  await transaction.commit();
+  const end = startTimer("deleteAllEvents", db.name);
+  try {
+    const transaction = db.transaction("events", "readwrite");
+    await transaction.objectStore("events").clear();
+    await transaction.commit();
+    await transaction.done;
 
-  // Clear index cache if provided
-  if (indexCache) {
-    indexCache.clear();
+    // Clear index cache if provided
+    if (indexCache) {
+      indexCache.clear();
+    }
+  } finally {
+    end();
   }
 }

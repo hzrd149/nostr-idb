@@ -8,6 +8,7 @@ import {
 import { isAddressableKind, isReplaceableKind } from "../lib/nostr.js";
 import { getEventUID } from "./common.js";
 import { NostrIDBDatabase, Schema } from "./schema.js";
+import { startTimer } from "../debug.js";
 
 export const NOSTR_IDB_NAME = "nostr-idb";
 export const NOSTR_IDB_VERSION = 3;
@@ -17,37 +18,42 @@ export async function openDB(
   name = NOSTR_IDB_NAME,
   callbacks?: OpenDBCallbacks<Schema>,
 ): Promise<NostrIDBDatabase> {
-  return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
-    ...callbacks,
-    async upgrade(db, oldVersion, newVersion, transaction, event) {
-      if (oldVersion === 0) {
-        const events = db.createObjectStore("events");
-        events.createIndex("id", "event.id", { unique: true });
-        events.createIndex("pubkey", "event.pubkey");
-        events.createIndex("kind", "event.kind");
-        events.createIndex("created_at", "event.created_at");
+  const end = startTimer("openDB", name);
+  try {
+    return await idbOpenDB<Schema>(name, NOSTR_IDB_VERSION, {
+      ...callbacks,
+      async upgrade(db, oldVersion, newVersion, transaction, event) {
+        if (oldVersion === 0) {
+          const events = db.createObjectStore("events");
+          events.createIndex("id", "event.id", { unique: true });
+          events.createIndex("pubkey", "event.pubkey");
+          events.createIndex("kind", "event.kind");
+          events.createIndex("created_at", "event.created_at");
 
-        events.createIndex("tags", "tags", { multiEntry: true });
+          events.createIndex("tags", "tags", { multiEntry: true });
 
-        const used = db.createObjectStore("used", { keyPath: "uid" });
-        used.createIndex("date", "date");
-      }
+          const used = db.createObjectStore("used", { keyPath: "uid" });
+          used.createIndex("date", "date");
+        }
 
-      // Migrate from v1 to v2
-      if (oldVersion === 1) {
-        db.deleteObjectStore("events");
-        db.deleteObjectStore("used");
-        // @ts-ignore
-        db.deleteObjectStore("seen");
-      }
+        // Migrate from v1 to v2
+        if (oldVersion === 1) {
+          db.deleteObjectStore("events");
+          db.deleteObjectStore("used");
+          // @ts-ignore
+          db.deleteObjectStore("seen");
+        }
 
-      // Migrate replaceable event UIDs for v3
-      if (oldVersion <= 2) await migrateReplaceableEventUIDs(transaction);
+        // Migrate replaceable event UIDs for v3
+        if (oldVersion <= 2) await migrateReplaceableEventUIDs(transaction);
 
-      if (callbacks?.upgrade)
-        callbacks.upgrade(db, oldVersion, newVersion, transaction, event);
-    },
-  });
+        if (callbacks?.upgrade)
+          callbacks.upgrade(db, oldVersion, newVersion, transaction, event);
+      },
+    });
+  } finally {
+    end();
+  }
 }
 
 /** Delete a database with the given name and version */
@@ -55,13 +61,23 @@ export async function deleteDB(
   name = NOSTR_IDB_NAME,
   callbacks?: DeleteDBCallbacks,
 ) {
-  return await idbDeleteDB(name, callbacks);
+  const end = startTimer("deleteDB", name);
+  try {
+    return await idbDeleteDB(name, callbacks);
+  } finally {
+    end();
+  }
 }
 
 /** Clear all events and used from the database */
 export async function clearDB(db: NostrIDBDatabase) {
-  await db.clear("events");
-  await db.clear("used");
+  const end = startTimer("clearDB", db.name);
+  try {
+    await db.clear("events");
+    await db.clear("used");
+  } finally {
+    end();
+  }
 }
 
 /** Migrate replaceable event UIDs for v3 */

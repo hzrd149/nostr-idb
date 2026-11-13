@@ -34,6 +34,32 @@ await db.stop();
 
 ## API overview
 
+### Diagnostics
+
+```ts
+import { configureDiagnostics } from "nostr-idb";
+
+configureDiagnostics({ debug: true, timing: true });
+configureDiagnostics({ timing: false }); // Leave debug logging enabled
+```
+
+Both flags default to `false` and apply to all instances in this loaded copy of
+the library, including standalone helpers. The same function and its
+`DiagnosticsOptions` type are exported from `nostr-idb/database`. Omitted flags
+keep their current values; changes take effect at runtime.
+
+`debug` enables namespaced `console.debug` messages (enable the browser console's
+Verbose level if needed). It replaces the previous `DEBUG` environment variable
+and `localStorage.debug` configuration, which are no longer read.
+
+`timing` independently enables `console.time` / `console.timeEnd` for database
+operations, index queries, event loading, nonempty write-queue flushes, and
+subscription historical reads. Labels include the operation, database name when
+available, and a unique invocation number. Nested timings overlap and should not
+be added together. Timers close on success or failure, even if timing is disabled
+while an operation is running. Timings include asynchronous waiting; console
+instrumentation itself adds overhead.
+
 ### `NostrIDB`
 
 `new NostrIDB(db?, options?)` opens the default database or wraps one returned by
