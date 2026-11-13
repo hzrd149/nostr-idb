@@ -17,6 +17,7 @@ Live Examples: https://hzrd149.github.io/nostr-idb/
 - Caches indexes in memory
 - `NostrIDB` class with NIP-DB-compatible API (`query`, `count`, `subscribe` as AsyncGenerator)
 - NIP-91 AND-filter support (`&t` keys)
+- App-defined event sidecar metadata with extraction and attachment hooks
 
 ## Development and CI
 
@@ -110,9 +111,17 @@ const nostrDB = new NostrIDB(db, {
 
 ### API Methods
 
-#### `add(event: NostrEvent): Promise<boolean>`
+#### `add(event: TEvent, metadata?: TMetadata): Promise<boolean>`
 
 Add a single event to the database. Returns `true` if the event was accepted. Ephemeral events are fanned out to active subscriptions but not persisted.
+
+#### `setMetadata(eventId: string, metadata: TMetadata): Promise<boolean>`
+
+Replace the entire sidecar for an exact event ID, including pending and cached copies. Returns `false` if the event is neither persisted nor pending. For replaceable events, pass the event's `id`, not its address/UID.
+
+#### `clearMetadata(eventId: string): Promise<boolean>`
+
+Remove the sidecar for an exact event ID. Returns `false` if the event is neither persisted nor pending.
 
 #### `event(id: string): Promise<NostrEvent | undefined>`
 
@@ -175,6 +184,69 @@ Start background write-flush and prune timers. Called automatically by the const
 #### `stop(): Promise<void>`
 
 Stop background write-flush and prune timers.
+
+### Event sidecar metadata
+
+Metadata is generic and stored alongside the event as an optional `metadata` field
+in its database row. Configure synchronous hooks to translate event properties or
+symbols into structured-cloneable data and restore that data on reads:
+
+```typescript
+import { NostrIDB, openDB, type NostrEvent } from "nostr-idb";
+
+type Metadata = { relays?: string[]; verified?: boolean };
+const metadataSymbol = Symbol.for("my-app.event-metadata");
+type AppEvent = NostrEvent & { [metadataSymbol]?: Metadata };
+
+const db = new NostrIDB<AppEvent, Metadata>(await openDB("my-events"), {
+  metadata: {
+    read: (event) => event[metadataSymbol],
+    attach(event, metadata) {
+      if (metadata === undefined) delete event[metadataSymbol];
+      else event[metadataSymbol] = metadata;
+    },
+  },
+});
+
+// For an AppEvent received by your application:
+await db.add(event, { relays: ["wss://relay.example"], verified: true });
+await db.add(event); // Extract using read(event)
+
+// Replace, rather than merge, the existing sidecar:
+await db.setMetadata(event.id, { relays: ["wss://another.example"] });
+await db.clearMetadata(event.id);
+```
+
+- Explicit metadata takes precedence over `read`. An explicitly supplied
+  `undefined` skips extraction. Missing/undefined metadata preserves the existing
+  sidecar for that exact event; use `clearMetadata` to remove it.
+- Metadata is snapshotted at the time of the call. Mutating the original value or
+  attached data does not change the persisted sidecar; call `add` or `setMetadata`
+  again to save changes. Non-cloneable metadata rejects the operation.
+- `attach` receives a separate copy on reads and updates. It must remove previously
+  attached metadata when passed `undefined`, and must not change signed event fields.
+  Symbols or non-enumerable properties keep attachments out of event JSON.
+- Metadata follows an exact event ID. Newer replaceable events do not inherit the
+  previous version's sidecar. Re-adding the same event can replace its metadata.
+- `query`, `event`, `replaceable`, and historical subscriptions restore metadata.
+  Pending query results and objects retained in this instance's event cache are
+  updated too. Metadata-only updates do not emit subscription events. Other
+  instances' caches and previously returned objects no longer cached are not synchronized.
+- `add` and updates to pending events use the normal write queue; updating an
+  already persisted event waits for its metadata write to complete. Updates are
+  serialized with queue flushes. A `writeQueue.processEvents` hook must not await
+  `add`, metadata mutations, or another flush on the same instance.
+- Existing database rows without sidecars remain readable; no schema migration is
+  needed. Deleting or pruning a persisted row removes its sidecar with it.
+- Verification flags are app-provided data; storing them does not verify signatures.
+
+Low-level users can pass a `ReadonlyMap<string, unknown>` keyed by event ID as the
+third argument to `addEvents`. Missing entries preserve existing sidecars; an
+explicit `undefined` entry clears one. `setEventMetadata(db, id, value)` updates a
+persisted sidecar independently (`undefined` clears). The query helpers accept an
+optional final `EventReader` callback receiving `{ event, tags, metadata? }` to
+restore metadata onto returned events. Low-level writes do not synchronize
+`NostrIDB` caches.
 
 ### Advanced Usage
 

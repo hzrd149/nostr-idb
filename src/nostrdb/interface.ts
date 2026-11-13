@@ -15,9 +15,18 @@ export type Features = "search";
  * methods are compatible with that spec. The `deleteEvent`, `deleteReplaceable`,
  * `deleteByFilters`, and `deleteAllEvents` methods are local extensions.
  */
-export interface INostrIDB<TEvent extends StoredEvent = StoredEvent> {
+export interface INostrIDB<
+  TEvent extends StoredEvent = StoredEvent,
+  TMetadata = unknown,
+> {
   /** Add an event to the database */
-  add(event: TEvent): Promise<boolean>;
+  add(event: TEvent, metadata?: TMetadata): Promise<boolean>;
+
+  /** Replace metadata for an exact stored or pending event ID. */
+  setMetadata(eventId: string, metadata: TMetadata): Promise<boolean>;
+
+  /** Remove metadata for an exact stored or pending event ID. */
+  clearMetadata(eventId: string): Promise<boolean>;
 
   /** Get a single event by ID */
   event(id: string): Promise<TEvent | undefined>;

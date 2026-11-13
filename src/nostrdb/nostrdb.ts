@@ -1,5 +1,9 @@
 import type { StoredEvent } from "../lib/nostr.js";
-import { isEphemeralKind } from "../lib/nostr.js";
+import {
+  isEphemeralKind,
+  isReplaceableKind,
+  isAddressableKind,
+} from "../lib/nostr.js";
 import { matchFilters } from "../lib/nostr.js";
 import type { Filter } from "../lib/nostr.js";
 
@@ -18,6 +22,9 @@ import {
   getEventsForFilters,
 } from "../database/query-filter.js";
 import type { NostrIDBDatabase } from "../database/schema.js";
+import type { EventReader } from "../database/metadata.js";
+import { setEventMetadata } from "../database/metadata.js";
+import type { EventMetadataOptions } from "./metadata.js";
 import { logger } from "../debug.js";
 import { nanoid } from "../lib/nanoid.js";
 import { selectEventsForFilters } from "../utils.js";
@@ -53,7 +60,12 @@ export type InternalSubscriptionFor<TEvent extends StoredEvent> =
     eose?: () => void;
   };
 
-export type NostrDBOptions = {
+export type NostrDBOptions<
+  TEvent extends StoredEvent = StoredEvent,
+  TMetadata = unknown,
+> = {
+  /** Extract and restore app-defined event sidecars. */
+  metadata?: EventMetadataOptions<TEvent, TMetadata>;
   /** Defaults to 1000 */
   batchWrite?: number;
   /** Defaults to 100 */
@@ -68,7 +80,7 @@ export type NostrDBOptions = {
   maxMemoryEvents?: number;
 };
 
-const defaultOptions: Required<NostrDBOptions> = {
+const defaultOptions: Required<Omit<NostrDBOptions, "metadata">> = {
   batchWrite: 1000,
   writeInterval: 100,
   cacheIndexes: 1000,
@@ -80,10 +92,11 @@ const defaultOptions: Required<NostrDBOptions> = {
 const log = logger.extend("nostridb");
 
 /** Main class that implements the nostrdb logic */
-export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
-  implements INostrIDB<TEvent>
-{
-  options: Required<NostrDBOptions>;
+export class NostrIDB<
+  TEvent extends StoredEvent = StoredEvent,
+  TMetadata = unknown,
+> implements INostrIDB<TEvent, TMetadata> {
+  options: Required<NostrDBOptions<TEvent, TMetadata>>;
   running = false;
   private writeInterval?: ReturnType<typeof setTimeout>;
   private pruneInterval?: ReturnType<typeof setInterval>;
@@ -107,10 +120,14 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
   /** Map of active subscriptions */
   subscriptions: Map<string, InternalSubscriptionFor<TEvent>> = new Map();
 
-  constructor(db?: NostrIDBDatabase, opts: NostrDBOptions = {}) {
+  constructor(
+    db?: NostrIDBDatabase,
+    opts: NostrDBOptions<TEvent, TMetadata> = {},
+  ) {
     this.options = {
       ...defaultOptions,
       ...opts,
+      metadata: opts.metadata ?? {},
       maxMemoryEvents:
         opts.maxMemoryEvents ??
         opts.maxEvents ??
@@ -196,33 +213,117 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
   }
 
   /** Add an event to the database */
-  async add(event: TEvent): Promise<boolean> {
-    // if the event is not ephemeral, add it to the write queue and index cache
-    if (!isEphemeralKind(event.kind)) {
-      const queue = await this.getWriteQueue();
-      queue.addEvent(event);
-      this.indexCache.addEventToIndexes(event);
-    }
-
-    const uid = getEventUID(event);
-    if (!this.eventMap.has(uid)) {
-      // add the event to the in-memory event map
-      if (!isEphemeralKind(event.kind)) this.addToEventMaps([event]);
-
-      // Pass event to active subscriptions
-      for (const [_id, sub] of this.subscriptions) {
-        if (sub.event && matchFilters(sub.filters, event)) sub.event(event);
+  async add(event: TEvent, metadata?: TMetadata): Promise<boolean> {
+    // Snapshot before the first await so callers can safely reuse mutable metadata.
+    const snapshot = structuredClone(
+      arguments.length > 1 ? metadata : this.options.metadata.read?.(event),
+    );
+    const queue = await this.getWriteQueue();
+    return queue.runExclusive(async () => {
+      const uid = getEventUID(event);
+      let sidecar: unknown = snapshot;
+      if (!isEphemeralKind(event.kind)) {
+        const pending = queue.getPending(uid);
+        // Ordinary adds without restoration hooks retain the batched-write path.
+        // Only read here when resolving existing metadata or replacement ordering.
+        const needsStoredEvent =
+          isReplaceableKind(event.kind) ||
+          isAddressableKind(event.kind) ||
+          (this.options.metadata.attach &&
+            snapshot === undefined &&
+            !(pending?.id === event.id && queue.hasMetadata(event.id)));
+        const row = needsStoredEvent
+          ? await (await this.getDb()).get("events", uid)
+          : undefined;
+        if (
+          [pending, row?.event].some(
+            (current) =>
+              current &&
+              current.id !== event.id &&
+              current.created_at >= event.created_at,
+          )
+        )
+          return true;
+        if (sidecar === undefined) {
+          sidecar =
+            pending?.id === event.id && queue.hasMetadata(event.id)
+              ? queue.getMetadata(event.id)
+              : row?.event.id === event.id
+                ? row.metadata
+                : undefined;
+        }
+        this.attachMetadata(event, sidecar);
+        if (snapshot === undefined) queue.addEvent(event);
+        else queue.addEvent(event, snapshot);
+        this.indexCache.addEventToIndexes(event);
+      } else {
+        this.attachMetadata(event, sidecar);
       }
-    }
 
-    return true;
+      const cached = this.eventMap.get(uid);
+      if (cached?.id === event.id) this.attachMetadata(cached, sidecar);
+      if (!isEphemeralKind(event.kind)) this.addToEventMaps([event]);
+      if (cached?.id !== event.id) {
+        for (const sub of this.subscriptions.values()) {
+          if (sub.event && matchFilters(sub.filters, event)) sub.event(event);
+        }
+      }
+      return true;
+    });
+  }
+
+  private attachMetadata(event: TEvent, metadata: unknown) {
+    this.options.metadata.attach?.(
+      event,
+      structuredClone(metadata) as TMetadata | undefined,
+    );
+  }
+
+  private readEvent: EventReader<TEvent> = (row) => {
+    const event = row.event as TEvent;
+    this.attachMetadata(event, row.metadata);
+    return event;
+  };
+
+  /** Replace metadata for an exact event ID without re-adding the event. */
+  async setMetadata(eventId: string, metadata: TMetadata): Promise<boolean> {
+    return this.updateMetadata(eventId, metadata);
+  }
+
+  /** Clear metadata for an exact event ID, including cached and pending copies. */
+  async clearMetadata(eventId: string): Promise<boolean> {
+    return this.updateMetadata(eventId, undefined);
+  }
+
+  private async updateMetadata(
+    eventId: string,
+    metadata: TMetadata | undefined,
+  ): Promise<boolean> {
+    const snapshot = structuredClone(metadata);
+    const queue = await this.getWriteQueue();
+    return queue.runExclusive(async () => {
+      const stored = await setEventMetadata(
+        await this.getDb(),
+        eventId,
+        snapshot,
+      );
+      const pending = queue.setMetadata(eventId, snapshot);
+      if (!stored && !pending) return false;
+      if (pending) this.attachMetadata(pending, snapshot);
+      for (const event of this.eventMap.values()) {
+        if (event.id === eventId) this.attachMetadata(event, snapshot);
+      }
+      return true;
+    });
   }
 
   /** Get a single event by its ID */
   async event(id: string): Promise<TEvent | undefined> {
     const db = await this.getDb();
-    const result = await db.get("events", id);
-    return result?.event as TEvent | undefined;
+    const result =
+      (await db.get("events", id)) ??
+      (await db.getFromIndex("events", "id", id));
+    return result ? this.readEvent(result) : undefined;
   }
 
   /** Get the latest replaceable event for a given kind, author, and optional identifier */
@@ -257,6 +358,7 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
       eventsFromQueue.length ? f.map(({ limit, ...filter }) => filter) : f,
       this.indexCache,
       this.eventMap,
+      this.readEvent,
     );
 
     // Add events to event map
@@ -458,6 +560,7 @@ export class NostrIDB<TEvent extends StoredEvent = StoredEvent>
           : sub.filters,
         this.indexCache,
         this.eventMap,
+        this.readEvent,
       ).then((filterEvents) => {
         clearTimeout(timeout);
         this.addToEventMaps(filterEvents);

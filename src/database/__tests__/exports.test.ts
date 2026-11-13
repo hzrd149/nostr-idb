@@ -38,6 +38,7 @@ describe("exports", () => {
         "queryForTag",
         "queryForTagAnd",
         "queryForTime",
+        "setEventMetadata",
         "updateUsed",
       ]
     `);

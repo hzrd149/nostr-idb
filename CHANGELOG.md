@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Features
+
+- Add generic event sidecar metadata with typed extraction/attachment hooks, explicit metadata on `add`, and independent `setMetadata` / `clearMetadata` operations.
+- Preserve sidecars across duplicate saves, replace them without merging, and isolate them by exact event ID across replaceable-event versions; support pending, cached, and persisted reads and updates.
+- Expose low-level sidecar writes and row-reader callbacks without requiring a database version upgrade.
+
 ### Performance Improvements
 
 - Reduce event-body reads for limited author and kind queries while preserving timestamp ties, cached-event precedence, and filter semantics.

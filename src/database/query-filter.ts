@@ -1,4 +1,6 @@
 import type { StoredEvent } from "../lib/nostr.js";
+import type { EventReader } from "./metadata.js";
+import type { Schema } from "./schema.js";
 import { IndexCache } from "../cache/index-cache.js";
 import { selectEventsForFilters } from "../utils.js";
 import { matchFilter } from "../lib/nostr.js";
@@ -334,6 +336,7 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
   uids: string[],
   filters: Filter[],
   eventMap?: Map<string, TEvent>,
+  readEvent: EventReader<TEvent> = (row) => row.event as TEvent,
 ): Promise<TEvent[]> {
   const eventBuffer: TEvent[] = [];
 
@@ -386,7 +389,7 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
       if (wanted.has(uid)) {
         const row = await objectStore.get(uid);
         if (row && matchFilter(filter, row.event)) {
-          loaded.set(uid, row.event as TEvent);
+          loaded.set(uid, readEvent(row));
           if (++matched === limit) cutoff = cursor.key;
         }
       }
@@ -406,8 +409,8 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
     }
   }
 
-  const handleEntry = (e?: { event: StoredEvent }) =>
-    e && eventBuffer.push(e.event as TEvent);
+  const handleEntry = (e?: Schema["events"]["value"]) =>
+    e && eventBuffer.push(readEvent(e));
   const promises = Array.from(remainingIds).map((uid) =>
     objectStore.get(uid).then(handleEntry),
   );
@@ -425,9 +428,16 @@ export async function getEventsForFilter<
   filter: Filter,
   indexCache?: IndexCache,
   eventMap?: Map<string, TEvent>,
+  readEvent?: EventReader<TEvent>,
 ): Promise<TEvent[]> {
   const ids = await getIdsForFilter(db, filter, indexCache);
-  return await loadEventsByUID(db, Array.from(ids), [filter], eventMap);
+  return await loadEventsByUID(
+    db,
+    Array.from(ids),
+    [filter],
+    eventMap,
+    readEvent,
+  );
 }
 
 /** Return all events for the given filters */
@@ -438,9 +448,16 @@ export async function getEventsForFilters<
   filters: Filter[],
   indexCache?: IndexCache,
   eventMap?: Map<string, TEvent>,
+  readEvent?: EventReader<TEvent>,
 ): Promise<TEvent[]> {
   const ids = await getIdsForFilters(db, filters, indexCache);
-  return await loadEventsByUID(db, Array.from(ids), filters, eventMap);
+  return await loadEventsByUID(
+    db,
+    Array.from(ids),
+    filters,
+    eventMap,
+    readEvent,
+  );
 }
 
 /** Return the number of events for the given filter */
