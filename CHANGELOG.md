@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 6.0.1
+
 ### Performance Improvements
 
 - Reduce event-body reads for limited indexed-tag queries while preserving timestamp ties and cached-event precedence.
