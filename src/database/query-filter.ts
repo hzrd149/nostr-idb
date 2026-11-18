@@ -1,4 +1,5 @@
 import type { StoredEvent } from "../lib/nostr.js";
+import { unwrap } from "idb";
 import type { EventReader } from "./metadata.js";
 import type { Schema } from "./schema.js";
 import { IndexCache } from "../cache/index-cache.js";
@@ -508,14 +509,33 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
         return selectEventsForFilters(eventBuffer, filters);
       }
     }
-    const handleEntry = (e?: Schema["events"]["value"]) =>
-      e && eventBuffer.push(readEvent(e));
-    const promises = Array.from(remainingIds).map((uid) =>
-      objectStore.get(uid).then(handleEntry),
-    );
-    trans.commit();
-
-    await Promise.all(promises);
+    // Share handlers and one completion promise instead of allocating an idb
+    // wrapper, consumer closure and Promise.all entry for every event body.
+    const nativeStore = unwrap(objectStore);
+    await new Promise<void>((resolve, reject) => {
+      // Observe completion/abort even if a reader or request rejects first.
+      void trans.done.then(resolve, reject);
+      function handleEntry(
+        this: IDBRequest<Schema["events"]["value"] | undefined>,
+      ) {
+        try {
+          if (this.result) eventBuffer.push(readEvent(this.result));
+        } catch (error) {
+          // Don't throw from an IDB handler: that would abort the transaction
+          // and replace the reader's original error with AbortError.
+          reject(error);
+        }
+      }
+      function handleError(this: IDBRequest) {
+        reject(this.error);
+      }
+      for (const uid of remainingIds) {
+        const request = nativeStore.get(uid);
+        request.onsuccess = handleEntry;
+        request.onerror = handleError;
+      }
+      trans.commit();
+    });
     return selectEventsForFilters(eventBuffer, filters);
   } finally {
     end();

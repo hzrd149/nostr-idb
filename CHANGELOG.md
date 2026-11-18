@@ -6,6 +6,7 @@
 
 - Reduce event-body reads for limited indexed-tag queries while preserving timestamp ties and cached-event precedence.
 - Use bulk index reads for dense single-filter selections without a supplied index cache, avoiding per-event request/promise chains; retain point reads for sparse selections, time windows, and mostly cached results.
+- Reduce allocation pressure in fallback event-body reads by using native IndexedDB requests with shared handlers instead of per-event Promise wrappers, while preserving reader errors and transaction failures.
 
 ## 6.0.0
 
