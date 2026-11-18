@@ -395,6 +395,8 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
   filters: Filter[],
   eventMap?: Map<string, TEvent>,
   readEvent: EventReader<TEvent> = (row) => row.event as TEvent,
+  allowBulkReads = true,
+  allowTagLimit = true,
 ): Promise<TEvent[]> {
   const end = startTimer("loadEventsByUID", db.name);
   try {
@@ -418,8 +420,9 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
 
     const filter = filters[0];
     const limit = filter.limit;
-    // Only optimize simple index-backed filters. Time-filter candidate truncation
-    // and multi-filter limits retain their existing paths.
+    // Only optimize index-backed filters. Time-filter candidate truncation and
+    // multi-filter limits retain their existing paths. Custom readers may alter
+    // tags, so retain their previous loading behavior for tag-limited queries.
     if (
       filters.length === 1 &&
       limit !== undefined &&
@@ -427,8 +430,12 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
       limit > 0 &&
       remainingIds.length >= 128 &&
       remainingIds.length > limit * 2 &&
-      Object.keys(filter).every((key) =>
-        ["authors", "kinds", "limit"].includes(key),
+      Object.keys(filter).every(
+        (key) =>
+          ["authors", "kinds", "limit"].includes(key) ||
+          (allowTagLimit &&
+            (key[0] === "#" || key[0] === "&") &&
+            INDEXABLE_TAGS.includes(key.slice(1))),
       )
     ) {
       const wanted = new Set(remainingIds);
@@ -469,6 +476,38 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
       }
     }
 
+    // Bulk reads avoid one request/promise chain per body for dense selections.
+    // Count first and allow at most 10% over-fetch: a broad index must not turn a
+    // sparse query or warm body cache into a large over-read. Time-window queries
+    // retain point reads; keep the limited time-cursor strategy above first.
+    const bulk =
+      allowBulkReads &&
+      filters.length === 1 &&
+      filter.since === undefined &&
+      filter.until === undefined
+        ? getBulkReadIndex(filter)
+        : undefined;
+    if (bulk && remainingIds.length >= 128) {
+      const index = objectStore.index(bulk.name);
+      const count = await index.count(bulk.key);
+      if (count <= remainingIds.length * 1.1) {
+        // Keys and rows from the same index/transaction have identical ordering.
+        // Use actual primary keys, not getEventUID: callers may retain versions
+        // of replaceable events under their exact event IDs.
+        const [keys, rows] = await Promise.all([
+          index.getAllKeys(bulk.key),
+          index.getAll(bulk.key),
+        ]);
+        trans.commit();
+        const positions = new Map(keys.map((key, i) => [key, i]));
+        for (const uid of remainingIds) {
+          const position = positions.get(uid);
+          if (position !== undefined)
+            eventBuffer.push(readEvent(rows[position]));
+        }
+        return selectEventsForFilters(eventBuffer, filters);
+      }
+    }
     const handleEntry = (e?: Schema["events"]["value"]) =>
       e && eventBuffer.push(readEvent(e));
     const promises = Array.from(remainingIds).map((uid) =>
@@ -481,6 +520,23 @@ async function loadEventsByUID<TEvent extends StoredEvent = StoredEvent>(
   } finally {
     end();
   }
+}
+
+/** Choose an exact index bucket that contains every candidate for one filter. */
+function getBulkReadIndex(
+  filter: Filter,
+): { name: "tags" | "pubkey" | "kind"; key: string | number } | undefined {
+  // IDs use a different lookup path; avoid bulk-reading unrelated index buckets.
+  if (filter.ids) return;
+  for (const tag of INDEXABLE_TAGS) {
+    const values = filter[`&${tag}`]?.length
+      ? filter[`&${tag}`]
+      : filter[`#${tag}`];
+    if (values?.length === 1) return { name: "tags", key: tag + values[0] };
+  }
+  if (filter.authors?.length === 1)
+    return { name: "pubkey", key: filter.authors[0] };
+  if (filter.kinds?.length === 1) return { name: "kind", key: filter.kinds[0] };
 }
 
 /** Return all events for the given filter */
@@ -502,6 +558,8 @@ export async function getEventsForFilter<
       [filter],
       eventMap,
       readEvent,
+      !indexCache,
+      !readEvent,
     );
   } finally {
     end();
@@ -527,6 +585,8 @@ export async function getEventsForFilters<
       filters,
       eventMap,
       readEvent,
+      !indexCache,
+      !readEvent,
     );
   } finally {
     end();

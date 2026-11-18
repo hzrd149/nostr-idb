@@ -116,7 +116,7 @@ describe("limited candidate loading", () => {
     expect(getAll).not.toHaveBeenCalled();
   });
 
-  it("keeps sparse selections on point reads", async () => {
+  it("uses a dense kind bucket when candidates are sparse in the time index", async () => {
     await addEvents(
       db,
       Array.from({ length: 600 }, (_, i) =>
@@ -127,10 +127,12 @@ describe("limited candidate loading", () => {
     const expected = await pointReadResult([filter]);
     const get = vi.spyOn(IDBObjectStore.prototype, "get");
     const getAll = vi.spyOn(IDBObjectStore.prototype, "getAll");
+    const indexGetAll = vi.spyOn(IDBIndex.prototype, "getAll");
 
     expect(await getEventsForFilter(db, filter)).toEqual(expected);
     expect(getAll).not.toHaveBeenCalled();
-    expect(get).toHaveBeenCalledTimes(360);
+    expect(get).not.toHaveBeenCalled();
+    expect(indexGetAll).toHaveBeenCalledTimes(1);
   });
 
   it("preserves unlimited results and skips body reads for fully cached candidates", async () => {

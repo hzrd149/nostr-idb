@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Performance Improvements
+
+- Reduce event-body reads for limited indexed-tag queries while preserving timestamp ties and cached-event precedence.
+- Use bulk index reads for dense single-filter selections without a supplied index cache, avoiding per-event request/promise chains; retain point reads for sparse selections, time windows, and mostly cached results.
+
 ## 6.0.0
 
 ### Cursor Pagination
